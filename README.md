@@ -1,7 +1,7 @@
 | Supported Targets | ESP32-S3 |
 | ----------------- | -------- |
 
-Mainly 3d printed rain sensor with integration to HomeAutomation procject
+Mainly 3d printed rain sensor with integration to HomeAutomation project
 
 # Rain Sensor Project
 Hardware:
