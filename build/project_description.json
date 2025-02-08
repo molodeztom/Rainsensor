@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "Rainsensor",
-    "project_version":    "1",
+    "project_version":    "bab20ce-dirty",
     "project_path":       "D:/Projects/Rainsensor",
     "idf_path":           "C:/Tools/esp/v5.4/esp-idf",
     "build_dir":          "D:/Projects/Rainsensor/build",
@@ -1210,7 +1210,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [ "espressif__led_strip" ],
             "file": "D:/Projects/Rainsensor/build/esp-idf/main/libmain.a",
-            "sources": [ "D:/Projects/Rainsensor/main/blink_example_main.c" ],
+            "sources": [ "D:/Projects/Rainsensor/main/rainsensor_main.c" ],
             "include_dirs": [ "." ]
         },
         "mbedtls": {
