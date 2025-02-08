@@ -1,69 +1,98 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | -------- |
+| Supported Targets | ESP32-S3 |
+| ----------------- | -------- |
 
-# Blink Example
+Mainly 3d printed rain sensor with integration to HomeAutomation procject
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+# Rain Sensor Project
+Hardware:
+- Based on a rainsensor hardware from AliExpress
+- Due to much noise when the rocker hits the base I made some modifications
 
-This example demonstrates how to blink a LED by using the GPIO driver or using the [led_strip](https://components.espressif.com/component/espressif/led_strip) library if the LED is addressable e.g. [WS2812](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf). The `led_strip` library is installed via [component manager](main/idf_component.yml).
+## Features
+- **Rocker arm mechanism** for precise rain detection.
+- **Modular electronics** with adjustable thresholds and low-power operation.
+- **LoRa/Wi-Fi/MQTT integration** for seamless data transmission.
+- **Dynamic parameter adjustments** based on rainfall intensity.
 
-## How to Use Example
+---
 
-Before project configuration and build, be sure to set the correct chip target using `idf.py set-target <chip_name>`.
+## Electronics Overview
+- **Axle & Suspension**  
+  - New axle mounting with TPU suspension.  
+  - Redesigned base with TPU buffers for the rocker arm.  
 
-### Hardware Required
+- **Sensing & Signal Processing**  
+  - Hall sensor SS49E (replaces reed contact).  
+  - **LM393P dual-stage comparator circuit**:  
+    - Adjustable threshold.  
+    - Second stage with feedback to prevent oscillations.  
+    - 3.3V logic-compatible digital output for ESP32-S3.  
 
-* A development board with normal LED or addressable LED on-board (e.g., ESP32-S3-DevKitC, ESP32-C6-DevKitC etc.)
-* A USB cable for Power supply and programming
+- **Mechanical Adjustments**  
+  - Dual-plate base leveling system with knurled nuts.  
+  - Wedge plate to compensate for garage roof slope.  
+  - Cable clamp integrated into the base plate.  
 
-See [Development Boards](https://www.espressif.com/en/products/devkits) for more information about it.
+---
 
-### Configure the Project
+## Software Overview
+### Core Logic
+- **Ultra-Low Power (ULP) Co-Processor**:  
+  - Pulse counting handled by the ESP32-S3 ULP for energy efficiency.  
+  - Main processor sleeps until:  
+    - A predefined pulse count (`Ti`) is reached.  
+    - A time interval (`Tm`) expires for rainfall calculation.  
 
-Open the project configuration menu (`idf.py menuconfig`).
+- **Rainfall Calculation**:  
+  - Volume computed using:  
+    - Bucket volume of the rocker arm.  
+    - Pulse count and time interval (`Tm`).  
 
-In the `Example Configuration` menu:
+- **Dynamic Transmission**:  
+  - Data sent at interval `Tt`, adjusted based on rainfall intensity.  
+  - If no rain:  
+    - Main processor wakes after interval `Tks` to report status/battery.  
+    - Remains ready for parameter updates.  
 
-* Select the LED type in the `Blink LED type` option.
-  * Use `GPIO` for regular LED
-  * Use `LED strip` for addressable LED
-* If the LED type is `LED strip`, select the backend peripheral
-  * `RMT` is only available for ESP targets with RMT peripheral supported
-  * `SPI` is available for all ESP targets
-* Set the GPIO number used for the signal in the `Blink GPIO number` option.
-* Set the blinking period in the `Blink period in ms` option.
+### Configuration
+- Time intervals (`Ti`, `Tm`, `Tt`, `Tks`) and thresholds configurable via **LoRa**.  
 
-### Build and Flash
+---
 
-Run `idf.py -p PORT flash monitor` to build, flash and monitor the project.
+## Power Management
+- **3.3V LiPo-based power supply** optimized for long-term operation.  
+- ESP32-S3 ULP ensures minimal power consumption during idle states.  
 
-(To exit the serial monitor, type ``Ctrl-]``.)
+---
 
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
+## Data Transmission
+- **LoRa** for long-range, low-power communication.  
+- **LoRa-to-Wi-Fi Bridge**:  
+  - Integrates with home automation systems.  
+  - Converts LoRa payloads to MQTT topics.  
 
-## Example Output
+---
 
-As you run the example, you will see the LED blinking, according to the previously defined period. For the addressable LED, you can also change the LED color by setting the `led_strip_set_pixel(led_strip, 0, 16, 16, 16);` (LED Strip, Pixel Number, Red, Green, Blue) with values from 0 to 255 in the [source file](main/blink_example_main.c).
+## Integration & Visualization
+- **Home Automation**:  
+  - MQTT integration via Node-RED for automation workflows.  
+- **Data Pipeline**:  
+  - Node-RED → InfluxDB → Grafana dashboards.  
 
-```text
-I (315) example: Example configured to blink addressable LED!
-I (325) example: Turning the LED OFF!
-I (1325) example: Turning the LED ON!
-I (2325) example: Turning the LED OFF!
-I (3325) example: Turning the LED ON!
-I (4325) example: Turning the LED OFF!
-I (5325) example: Turning the LED ON!
-I (6325) example: Turning the LED OFF!
-I (7325) example: Turning the LED ON!
-I (8325) example: Turning the LED OFF!
-```
+---
 
-Note: The color order could be different according to the LED model.
+## Setup & Parameters
+Key parameters (adjust via LoRa/MQTT):
+```plaintext
+Ti  = Wake-up pulse count  
+Tm  = Rainfall calculation interval  
+Tt  = Dynamic data transmission interval  
+Tks = Status check interval (no-rain condition)  
 
-The pixel number indicates the pixel position in the LED strip. For a single LED, use 0.
 
-## Troubleshooting
 
-* If the LED isn't blinking, check the GPIO or the LED type selection in the `Example Configuration` menu.
 
-For any technical queries, please open an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
+
+
+
+
