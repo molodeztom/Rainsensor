@@ -3,9 +3,10 @@
 .vscode/*
 
 # ESP-IDF build artifacts
-build/
+build/*
 sdkconfig
 sdkconfig.old
+build.ninja
 
 # CMake and compiler files
 CMakeCache.txt
