@@ -18,13 +18,32 @@ RainSensor
   20240525  V0.1: Wakeup with timer and count boots in RTC memory (Copy from ESP32-S3 Test V0.2)
   */
  
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
+
+  #include <stdio.h>
+  #include <inttypes.h>
+  #include "esp_sleep.h"
+  #include "nvs.h"
+  #include "nvs_flash.h"
+  #include "soc/rtc_cntl_reg.h"
+  #include "soc/sens_reg.h"
+  #include "soc/rtc_periph.h"
+  #include "driver/gpio.h"
+  #include "driver/rtc_io.h"
+  #include "ulp.h"
+  #include "ulp_main.h"
+  #include "freertos/FreeRTOS.h"
+  #include "freertos/task.h"  
+
 #include "esp_log.h"
 #include "led_strip.h"
 #include "sdkconfig.h"
+
+
+extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
+extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
+
+static void init_ulp_program(void);
+static void update_pulse_count(void);
 
 static const char *TAG = "example";
 
