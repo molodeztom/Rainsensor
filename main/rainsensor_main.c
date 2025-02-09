@@ -16,10 +16,13 @@ RainSensor
 
   History: master if not shown otherwise
   20240525  V0.1: Wakeup with timer and count boots in RTC memory (Copy from ESP32-S3 Test V0.2)
+  20250109  V0.2: LED blinks on wakeup
   */
 
 #include <stdio.h>
 #include <inttypes.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_sleep.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -30,42 +33,62 @@ RainSensor
 #include "driver/rtc_io.h"
 #include "ulp.h"
 #include "ulp_main.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "led_strip.h"
 
+#include "esp_log.h"
+// definitions
+static const char *TAG = "rainsens";
+#define BLINK_GPIO CONFIG_BLINK_GPIO
+
+// external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
-extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
+extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
 
+// forward declarations
 static void init_ulp_program(void);
 static void update_pulse_count(void);
+static void configure_led(void);
+static led_strip_handle_t led_strip;
 
 void app_main(void)
 {
     /* If user is using USB-serial-jtag then idf monitor needs some time to
-    *  re-connect to the USB port. We wait 1 sec here to allow for it to make the reconnection
-    *  before we print anything. Otherwise the chip will go back to sleep again before the user
-    *  has time to monitor any output.
-    */
+     *  re-connect to the USB port. We wait 1 sec here to allow for it to make the reconnection
+     *  before we print anything. Otherwise the chip will go back to sleep again before the user
+     *  has time to monitor any output.
+     */
     vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_log_level_set("*", ESP_LOG_INFO);
+    printf("rainsensor V0.2\n\n");
+    printf("Firmware Version: %s\n", APP_VERSION);
 
+    /* Configure the peripheral according to the LED type */
+    configure_led();
+    led_strip_set_pixel(led_strip, 0, 0, 200, 0);
+    /* Refresh the strip to send data */
+    led_strip_refresh(led_strip);
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    if (cause != ESP_SLEEP_WAKEUP_ULP) {
+    if (cause != ESP_SLEEP_WAKEUP_ULP)
+    {
         printf("Not ULP wakeup, initializing ULP\n");
         init_ulp_program();
-    } else {
+    }
+    else
+    {
         printf("ULP wakeup, saving pulse count\n");
         update_pulse_count();
     }
 
     printf("Entering deep sleep\n\n");
-    ESP_ERROR_CHECK( esp_sleep_enable_ulp_wakeup() );
+    ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
+    led_strip_clear(led_strip);
     esp_deep_sleep_start();
 }
 
 static void init_ulp_program(void)
 {
     esp_err_t err = ulp_load_binary(0, ulp_main_bin_start,
-            (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t));
+                                    (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t));
     ESP_ERROR_CHECK(err);
 
     /* GPIO used for pulse counting. */
@@ -118,27 +141,44 @@ static void init_ulp_program(void)
 
 static void update_pulse_count(void)
 {
-    const char* nvs_namespace = "plusecnt";
-    const char* count_key = "count";
-
-    ESP_ERROR_CHECK( nvs_flash_init() );
+    const char *nvs_namespace = "plusecnt";
+    const char *count_key = "count";
+    ;
+    ESP_ERROR_CHECK(nvs_flash_init());
     nvs_handle_t handle;
-    ESP_ERROR_CHECK( nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     uint32_t pulse_count = 0;
     esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    printf("Read pulse count from NVS: %5" PRIu32"\n", pulse_count);
+    printf("Read pulse count from NVS: %5" PRIu32 "\n", pulse_count);
 
     /* ULP program counts signal edges, convert that to the number of pulses */
     uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
     /* In case of an odd number of edges, keep one until next time */
     ulp_edge_count = ulp_edge_count % 2;
-    printf("Pulse count from ULP: %5" PRIu32"\n", pulse_count_from_ulp);
+    printf("Pulse count from ULP: %5" PRIu32 "\n", pulse_count_from_ulp);
 
     /* Save the new pulse count to NVS */
     pulse_count += pulse_count_from_ulp;
     ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
-    printf("Wrote updated pulse count to NVS: %5" PRIu32"\n", pulse_count);
+    printf("Wrote updated pulse count to NVS: %5" PRIu32 "\n", pulse_count);
+}
+
+static void configure_led(void)
+{
+    ESP_LOGI(TAG, "Example configured to blink addressable LED!");
+   
+    /* LED strip initialization with the GPIO and pixels number*/
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = BLINK_GPIO,
+        .max_leds = 1, // at least one LED on board
+    };
+
+    led_strip_spi_config_t spi_config = {
+        .spi_bus = SPI2_HOST,
+        .flags.with_dma = true,
+    };
+    ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &led_strip));
 }
