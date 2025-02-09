@@ -17,6 +17,7 @@ RainSensor
   History: master if not shown otherwise
   20240525  V0.1: Wakeup with timer and count boots in RTC memory (Copy from ESP32-S3 Test V0.2)
   20250109  V0.2: LED blinks on wakeup
+  20250209  V0.3: Use GPIO8 as input for counter
   */
 
 #include <stdio.h>
@@ -92,7 +93,7 @@ static void init_ulp_program(void)
     ESP_ERROR_CHECK(err);
 
     /* GPIO used for pulse counting. */
-    gpio_num_t gpio_num = GPIO_NUM_0;
+    gpio_num_t gpio_num = GPIO_NUM_8;
     int rtcio_num = rtc_io_number_get(gpio_num);
     assert(rtc_gpio_is_valid_gpio(gpio_num) && "GPIO used for pulse counting must be an RTC IO");
 
@@ -105,11 +106,11 @@ static void init_ulp_program(void)
      *
      * Note that the ULP reads only the lower 16 bits of these variables.
      */
-    ulp_debounce_counter = 3;
+    ulp_debounce_counter = 2;
     ulp_debounce_max_count = 3;
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
-    ulp_edge_count_to_wake_up = 10;
+    ulp_edge_count_to_wake_up = 5;
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
@@ -132,7 +133,7 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 20000);
+    ulp_set_wakeup_period(0, 2000);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
