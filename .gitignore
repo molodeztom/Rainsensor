@@ -31,3 +31,5 @@ __pycache__/
 .espressif/
 dist/
 components/.cache/
+# ESP components
+managed_components/
