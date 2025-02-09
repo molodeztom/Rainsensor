@@ -1,136 +1,57 @@
-/**************************************************************************
-RainSensor
+/*
+ * SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Unlicense OR CC0-1.0
+ */
+/* ULP Example
 
+   This example code is in the Public Domain (or CC0 licensed, at your option.)
 
-  Hardware:
-  ESP32-S3-DevKitC-1 mit Wroom N16R8
-  LoRa E32-900T30D connected M0 M1 and Rx Tx
-  Hall Sensor with Adapter
-
-  Try sending a message to remote LoRa
-  Sleep for a certain time
-  Put LoRa to sleep mode
-  Setup LoRa to defined parameters
-  Measure Temperature
-  Send Temperature and Time Stamp
-
-  History: master if not shown otherwise
-  20240525  V0.1: Wakeup with timer and count boots in RTC memory (Copy from ESP32-S3 Test V0.2)
-  */
- 
-
-  #include <stdio.h>
-  #include <inttypes.h>
-  #include "esp_sleep.h"
-  #include "nvs.h"
-  #include "nvs_flash.h"
-  #include "soc/rtc_cntl_reg.h"
-  #include "soc/sens_reg.h"
-  #include "soc/rtc_periph.h"
-  #include "driver/gpio.h"
-  #include "driver/rtc_io.h"
-  #include "ulp.h"
-  #include "ulp_main.h"
-  #include "freertos/FreeRTOS.h"
-  #include "freertos/task.h"  
-
-#include "esp_log.h"
-#include "led_strip.h"
-#include "sdkconfig.h"
-
-
-extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
-extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
-
-static void init_ulp_program(void);
-static void update_pulse_count(void);
-
-static const char *TAG = "example";
-
-/* Use project configuration menu (idf.py menuconfig) to choose the GPIO to blink,
-   or you can edit the following line and set a number here.
+   Unless required by applicable law or agreed to in writing, this
+   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+   CONDITIONS OF ANY KIND, either express or implied.
 */
-#define BLINK_GPIO CONFIG_BLINK_GPIO
 
-static uint8_t s_led_state = 0;
+#include <stdio.h>
+#include <inttypes.h>
+#include "esp_sleep.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "soc/rtc_cntl_reg.h"
+#include "soc/sens_reg.h"
+#include "soc/rtc_periph.h"
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
+#include "ulp.h"
+#include "ulp_main.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-#ifdef CONFIG_BLINK_LED_STRIP
+//extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
+//extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
 
-static led_strip_handle_t led_strip;
-
-
-static void blink_led(void)
-{
-    /* If the addressable LED is enabled */
-    if (s_led_state) {
-        /* Set the LED pixel using RGB from 0 (0%) to 255 (100%) for each color */
-        led_strip_set_pixel(led_strip, 0, 0, 0, 60);
-        /* Refresh the strip to send data */
-        led_strip_refresh(led_strip);
-    } else {
-        /* Set all LED off to clear all pixels */
-        led_strip_clear(led_strip);
-    }
-}
-
-static void configure_led(void)
-{
-    ESP_LOGI(TAG, "Example configured to blink addressable LED!");
-    /* LED strip initialization with the GPIO and pixels number*/
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = BLINK_GPIO,
-        .max_leds = 1, // at least one LED on board
-    };
-#if CONFIG_BLINK_LED_STRIP_BACKEND_RMT
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000, // 10MHz
-        .flags.with_dma = false,
-    };
-    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
-#elif CONFIG_BLINK_LED_STRIP_BACKEND_SPI
-    led_strip_spi_config_t spi_config = {
-        .spi_bus = SPI2_HOST,
-        .flags.with_dma = true,
-    };
-    ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &led_strip));
-#else
-#error "unsupported LED strip backend"
-#endif
-    /* Set all LED off to clear all pixels */
-    led_strip_clear(led_strip);
-}
-
-#elif CONFIG_BLINK_LED_GPIO
-
-static void blink_led(void)
-{
-    /* Set the GPIO level according to the state (LOW or HIGH)*/
-    gpio_set_level(BLINK_GPIO, s_led_state);
-}
-
-static void configure_led(void)
-{
-    ESP_LOGI(TAG, "Example configured to blink GPIO LED!");
-    gpio_reset_pin(BLINK_GPIO);
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-}
-
-#else
-#error "unsupported LED type"
-#endif
+//static void init_ulp_program(void);
+//static void update_pulse_count(void);
 
 void app_main(void)
 {
+    /* If user is using USB-serial-jtag then idf monitor needs some time to
+    *  re-connect to the USB port. We wait 1 sec here to allow for it to make the reconnection
+    *  before we print anything. Otherwise the chip will go back to sleep again before the user
+    *  has time to monitor any output.
+    */
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-    /* Configure the peripheral according to the LED type */
-    configure_led();
-
-    while (1) {
-        ESP_LOGI(TAG, "Turning the LED %s!", s_led_state == true ? "ON" : "OFF");
-        blink_led();
-        /* Toggle the LED state */
-        s_led_state = !s_led_state;
-        vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
+/*     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause != ESP_SLEEP_WAKEUP_ULP) {
+        printf("Not ULP wakeup, initializing ULP\n");
+        init_ulp_program();
+    } else {
+        printf("ULP wakeup, saving pulse count\n");
+        update_pulse_count();
     }
+
+    printf("Entering deep sleep\n\n");
+    ESP_ERROR_CHECK( esp_sleep_enable_ulp_wakeup() );
+    esp_deep_sleep_start(); */
 }
