@@ -18,6 +18,7 @@ RainSensor
   20240525  V0.1: Wakeup with timer and count boots in RTC memory (Copy from ESP32-S3 Test V0.2)
   20250109  V0.2: LED blinks on wakeup
   20250209  V0.3: Use GPIO8 as input for counter
+  20250214  V0.4 Interrupt Test
   */
 
 #include <stdio.h>
