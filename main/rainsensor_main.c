@@ -19,6 +19,7 @@ RainSensor
   20250109  V0.2: LED blinks on wakeup
   20250209  V0.3: Use GPIO8 as input for counter
   20250214  V0.4 Interrupt Test
+  20250215  V0.5B: ISR registered usw.
   */
 
 #include <stdio.h>
@@ -36,6 +37,8 @@ RainSensor
 #include "ulp.h"
 #include "ulp_main.h"
 #include "led_strip.h"
+//#include "esp_intr_alloc.h"
+#include "driver/rtc_cntl.h"
 
 #include "esp_log.h"
 // definitions
@@ -51,6 +54,55 @@ static void init_ulp_program(void);
 static void update_pulse_count(void);
 static void configure_led(void);
 static led_strip_handle_t led_strip;
+static TaskHandle_t ulp_task_handle = NULL;
+
+static uint32_t interrupt_count = 0; 
+
+void signal_from_ulp() {
+   // ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
+    //led_strip_set_pixel(led_strip, 0, 200, 0, 0);
+    /* Refresh the strip to send data */
+    //led_strip_refresh(led_strip);
+   //interrupt_count++; 
+   int counter = 1;
+   counter++;
+   update_pulse_count();
+    
+}
+
+static void IRAM_ATTR ulp_isr_handler(void* arg) {
+    SET_PERI_REG_MASK(RTC_CNTL_INT_CLR_REG, RTC_CNTL_ULP_CP_INT_CLR_M);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xTaskNotifyFromISR(ulp_task_handle, 0, eNoAction, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+}
+
+void ulp_task(void* arg) {
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Warte auf Benachrichtigung
+        printf("Task notified");
+        led_strip_set_pixel(led_strip, 0, 0,0, 200);
+        /* Refresh the strip to send data */
+        led_strip_refresh(led_strip);
+        signal_from_ulp(); // Führe die spezifische Funktion aus
+    }
+}
+
+void setup_ulp_interrupt() {
+    esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M,ESP_INTR_FLAG_IRAM);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register ULP interrupt handler: %s", esp_err_to_name(err));
+        return;
+    }
+    printf("create ulp_task");
+    xTaskCreate(ulp_task, "ulp_task", 2048, NULL, 5, &ulp_task_handle);
+    // ULP-Interrupt aktivieren
+    SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
+    ESP_LOGI(TAG, "ULP interrupt enabled");
+}
+
 
 void app_main(void)
 {
@@ -61,11 +113,13 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.2\n\n");
+    printf("rainsensor V0.5.1B\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
-
+  
     /* Configure the peripheral according to the LED type */
     configure_led();
+    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
+
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
@@ -74,6 +128,8 @@ void app_main(void)
     {
         printf("Not ULP wakeup, initializing ULP\n");
         init_ulp_program();
+        setup_ulp_interrupt();
+      
     }
     else
     {
@@ -81,9 +137,15 @@ void app_main(void)
         update_pulse_count();
     }
 
-    printf("Entering deep sleep\n\n");
+   
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
+    // wait some time to get a chance to call interrupt from usp instead of wakeup
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
+        /* Start the program */
+        esp_err_t    err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
+        ESP_ERROR_CHECK(err);
     esp_deep_sleep_start();
 }
 
