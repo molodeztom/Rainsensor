@@ -64,9 +64,8 @@ void signal_from_ulp() {
     //led_strip_set_pixel(led_strip, 0, 200, 0, 0);
     /* Refresh the strip to send data */
     //led_strip_refresh(led_strip);
-   //interrupt_count++; 
-   int counter = 1;
-   counter++;
+   interrupt_count++; 
+   printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
    update_pulse_count();
     
 }
@@ -114,7 +113,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.5.2B\n\n");
+    printf("rainsensor V0.5.3B\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
   
     /* Configure the peripheral according to the LED type */
@@ -145,9 +144,6 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(10000));
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
-        /* Start the program */
-    //    esp_err_t    err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
-     //   ESP_ERROR_CHECK(err);
     esp_deep_sleep_start();
 }
 
@@ -217,13 +213,13 @@ static void update_pulse_count(void)
     esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
     printf("Read pulse count from NVS: %5" PRIu32 "\n", pulse_count);
-
+   
     /* ULP program counts signal edges, convert that to the number of pulses */
     uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
     /* In case of an odd number of edges, keep one until next time */
     ulp_edge_count = ulp_edge_count % 2;
     printf("Pulse count from ULP: %5" PRIu32 "\n", pulse_count_from_ulp);
-
+    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
     /* Save the new pulse count to NVS */
     pulse_count += pulse_count_from_ulp;
     ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
