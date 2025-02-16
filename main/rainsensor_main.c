@@ -60,10 +60,7 @@ static TaskHandle_t ulp_task_handle = NULL;
 static uint32_t interrupt_count = 0; 
 
 void signal_from_ulp() {
-   // ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
-    //led_strip_set_pixel(led_strip, 0, 200, 0, 0);
-    /* Refresh the strip to send data */
-    //led_strip_refresh(led_strip);
+   ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
    interrupt_count++; 
    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
    update_pulse_count();
@@ -82,7 +79,7 @@ static void IRAM_ATTR ulp_isr_handler(void* arg) {
 void ulp_task(void* arg) {
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Warte auf Benachrichtigung
-        printf("Task notified");
+        printf("Task notified \n");
         led_strip_set_pixel(led_strip, 0, 0,0, 200);
         /* Refresh the strip to send data */
         led_strip_refresh(led_strip);
@@ -96,9 +93,9 @@ void setup_ulp_interrupt() {
         ESP_LOGE(TAG, "Failed to register ULP interrupt handler: %s", esp_err_to_name(err));
         return;
     }
-    printf("create ulp_task");
+    ESP_LOGI(TAG, "Create ulp_task");
     xTaskCreate(ulp_task, "ulp_task", 2048, NULL, 5, &ulp_task_handle);
-    // ULP-Interrupt aktivieren
+    // ULP-Interrupt aktivieren, required!
     SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
     ESP_LOGI(TAG, "ULP interrupt enabled");
 }
