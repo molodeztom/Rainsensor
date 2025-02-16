@@ -135,6 +135,7 @@ void app_main(void)
     {
         printf("ULP wakeup, saving pulse count\n");
         update_pulse_count();
+        setup_ulp_interrupt();
     }
 
    
