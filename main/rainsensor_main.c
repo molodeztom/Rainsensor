@@ -20,6 +20,7 @@ RainSensor
   20250209  V0.3: Use GPIO8 as input for counter
   20250214  V0.4 Interrupt Test
   20250215  V0.5B: ISR registered usw.
+  20250216  V0.5.1B: Zählt mit und ohne laufender CPU allerdings müsste man sicherheitshalber die überprüfungen in wake up wieder einschalten
   */
 
 #include <stdio.h>
@@ -113,7 +114,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.5.1B\n\n");
+    printf("rainsensor V0.5.2B\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
   
     /* Configure the peripheral according to the LED type */
@@ -145,8 +146,8 @@ void app_main(void)
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
         /* Start the program */
-        esp_err_t    err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
-        ESP_ERROR_CHECK(err);
+    //    esp_err_t    err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
+     //   ESP_ERROR_CHECK(err);
     esp_deep_sleep_start();
 }
 
