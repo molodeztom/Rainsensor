@@ -21,6 +21,7 @@ RainSensor
   20250214  V0.4 Interrupt Test
   20250215  V0.5B: ISR registered usw.
   20250216  V0.5.1B: Zählt mit und ohne laufender CPU allerdings müsste man sicherheitshalber die überprüfungen in wake up wieder einschalten
+  20250225  V0.5.2B: Stack Size erhöht, unnötigen Code entfernt. Funktioniert so gut. 
   */
 
 #include <stdio.h>
@@ -38,7 +39,7 @@ RainSensor
 #include "ulp.h"
 #include "ulp_main.h"
 #include "led_strip.h"
-//#include "esp_intr_alloc.h"
+// #include "esp_intr_alloc.h"
 #include "driver/rtc_cntl.h"
 
 #include "esp_log.h"
@@ -57,49 +58,65 @@ static void configure_led(void);
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
 
-static uint32_t interrupt_count = 0; 
+static uint32_t interrupt_count = 0;
 
-void signal_from_ulp() {
-   ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
-   interrupt_count++; 
-   printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-   update_pulse_count();
-    
+void signal_from_ulp()
+{
+    ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
+    interrupt_count++;
+    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
+    update_pulse_count();
 }
 
-static void IRAM_ATTR ulp_isr_handler(void* arg) {
+static void IRAM_ATTR ulp_isr_handler(void *arg)
+{
     SET_PERI_REG_MASK(RTC_CNTL_INT_CLR_REG, RTC_CNTL_ULP_CP_INT_CLR_M);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xTaskNotifyFromISR(ulp_task_handle, 0, eNoAction, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
+    if (xHigherPriorityTaskWoken)
+    {
         portYIELD_FROM_ISR();
     }
 }
 
-void ulp_task(void* arg) {
-    while (1) {
+void ulp_task(void *arg)
+{
+    while (1)
+    {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Warte auf Benachrichtigung
         printf("Task notified \n");
-        led_strip_set_pixel(led_strip, 0, 0,0, 200);
-        /* Refresh the strip to send data */
-        led_strip_refresh(led_strip);
+        size_t freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+        printf("Free Memory: %d bytes\n", freeMemory);
+        // Überprüfe den Stack-Verbrauch
+        UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
+        printf("Stack High Water Mark: %d\n", highWaterMark);
         signal_from_ulp(); // Führe die spezifische Funktion aus
+        led_strip_set_pixel(led_strip, 0, 0, 0, 200);
+        /* Refresh the strip to send data */
+        led_strip_refresh(led_strip); // Überprüfe den freien Speicher
+
+        freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+        printf("Free Memory: %d bytes\n", freeMemory);
+        // Überprüfe den Stack-Verbrauch
+        highWaterMark = uxTaskGetStackHighWaterMark(NULL);
+        printf("Stack High Water Mark: %d\n", highWaterMark);
     }
 }
 
-void setup_ulp_interrupt() {
-    esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M,ESP_INTR_FLAG_IRAM);
-    if (err != ESP_OK) {
+void setup_ulp_interrupt()
+{
+    esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M, ESP_INTR_FLAG_IRAM);
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to register ULP interrupt handler: %s", esp_err_to_name(err));
         return;
     }
     ESP_LOGI(TAG, "Create ulp_task");
-    xTaskCreate(ulp_task, "ulp_task", 2048, NULL, 5, &ulp_task_handle);
+    xTaskCreate(ulp_task, "ulp_task", 4096, NULL, 5, &ulp_task_handle);
     // ULP-Interrupt aktivieren, required!
     SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
     ESP_LOGI(TAG, "ULP interrupt enabled");
 }
-
 
 void app_main(void)
 {
@@ -110,9 +127,9 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.5.3B\n\n");
+    printf("rainsensor V0.5.2B\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
-  
+
     /* Configure the peripheral according to the LED type */
     configure_led();
     printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
@@ -120,22 +137,19 @@ void app_main(void)
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
+    setup_ulp_interrupt();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
         printf("Not ULP wakeup, initializing ULP\n");
         init_ulp_program();
-        setup_ulp_interrupt();
-      
     }
     else
     {
         printf("ULP wakeup, saving pulse count\n");
         update_pulse_count();
-        setup_ulp_interrupt();
     }
 
-   
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
     // wait some time to get a chance to call interrupt from usp instead of wakeup
     vTaskDelay(pdMS_TO_TICKS(10000));
@@ -168,7 +182,7 @@ static void init_ulp_program(void)
     ulp_debounce_max_count = 3;
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
-    ulp_edge_count_to_wake_up = 5;
+    ulp_edge_count_to_wake_up = 10;
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
@@ -191,7 +205,7 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 2000);
+    ulp_set_wakeup_period(0, 4000);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
@@ -210,7 +224,7 @@ static void update_pulse_count(void)
     esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
     printf("Read pulse count from NVS: %5" PRIu32 "\n", pulse_count);
-   
+
     /* ULP program counts signal edges, convert that to the number of pulses */
     uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
     /* In case of an odd number of edges, keep one until next time */
@@ -228,7 +242,7 @@ static void update_pulse_count(void)
 static void configure_led(void)
 {
     ESP_LOGI(TAG, "Example configured to blink addressable LED!");
-   
+
     /* LED strip initialization with the GPIO and pixels number*/
     led_strip_config_t strip_config = {
         .strip_gpio_num = BLINK_GPIO,

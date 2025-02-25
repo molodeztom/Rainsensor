@@ -23,10 +23,10 @@ wake_up:
 	READ_RTC_FIELD(RTC_CNTL_LOW_POWER_ST_REG, RTC_CNTL_RDY_FOR_WAKEUP)
 	/* If the system is in normal mode or if the system is in sleep mode with ready for wakeup set, we can signal the main CPU to wakeup */
 	or r0, r0, r1
-	//jump wake_up, eq
+	jump wake_up, eq
 
 	/* Wake up the SoC, end program */
 	
 	wake
-	//WRITE_RTC_FIELD(RTC_CNTL_STATE0_REG, RTC_CNTL_ULP_CP_SLP_TIMER_EN, 0)
+//	WRITE_RTC_FIELD(RTC_CNTL_STATE0_REG, RTC_CNTL_ULP_CP_SLP_TIMER_EN, 0)
 	halt
