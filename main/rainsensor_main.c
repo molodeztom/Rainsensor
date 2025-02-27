@@ -22,6 +22,7 @@ RainSensor
   20250215  V0.5B: ISR registered usw.
   20250216  V0.5.1B: Zählt mit und ohne laufender CPU allerdings müsste man sicherheitshalber die überprüfungen in wake up wieder einschalten
   20250225  V0.5.2B: Stack Size erhöht, unnötigen Code entfernt. Funktioniert so gut. 
+  20250227  V0.6
   */
 
 #include <stdio.h>
