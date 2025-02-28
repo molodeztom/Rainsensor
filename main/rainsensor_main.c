@@ -55,6 +55,7 @@ extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
 // forward declarations
 static void init_ulp_program(void);
 static void update_pulse_count(void);
+static void update_timer_count(void);
 static void configure_led(void);
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -67,6 +68,7 @@ void signal_from_ulp()
     interrupt_count++;
     printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
     update_pulse_count();
+    update_timer_count();
 }
 
 static void IRAM_ATTR ulp_isr_handler(void *arg)
@@ -128,7 +130,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.5.2B\n\n");
+    printf("rainsensor V0.6.2.2\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
@@ -149,6 +151,7 @@ void app_main(void)
     {
         printf("ULP wakeup, saving pulse count\n");
         update_pulse_count();
+        update_timer_count();
     }
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
@@ -184,6 +187,7 @@ static void init_ulp_program(void)
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 10;
+    ulp_timer_count = 0;
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
@@ -238,6 +242,25 @@ static void update_pulse_count(void)
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
     printf("Wrote updated pulse count to NVS: %5" PRIu32 "\n", pulse_count);
+}
+
+static void update_timer_count(void)
+{
+    const char *nvs_namespace = "plusecnt";
+    const char *count_key = "pulse";
+    ;
+    ESP_ERROR_CHECK(nvs_flash_init());
+    nvs_handle_t handle;
+    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    uint32_t timer_count = 1;
+    esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
+    assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
+    printf("Read timer count from NVS: %5" PRIu32 "\n", timer_count);
+    uint32_t timer_count_from_ulp = (ulp_timer_count & UINT16_MAX) ;
+    printf("timer count from ULP: %5" PRIu32 "\n", timer_count_from_ulp);
+   
+    nvs_close(handle);
+  
 }
 
 static void configure_led(void)

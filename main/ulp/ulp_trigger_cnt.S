@@ -55,10 +55,25 @@ edge_count_to_wake_up:
 io_number:
 	.long 0
 
+	.global timer_count
+timer_count:
+	.long 0
+
 	/* Code goes into .text section */
 	.text
 	.global entry
 entry:
+	
+	    // Setze das Update-Bit, um das Ticks-Register zu aktualisieren
+    WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
+	    // Warte, bis das Update abgeschlossen ist
+
+    // Lese den unteren 32-Bit-Wert des Timers
+    READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 32)
+	move r1, r0
+    move r2, timer_count  // Speichere adresse von variable in r1
+	st r1, r2, 0 //speichere r0 in der variablen
+	
 	/* Load io_number */
 	move r3, io_number
 	ld r3, r3, 0
@@ -70,6 +85,7 @@ entry:
     /* ESP32S3 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_PERI_CLK_GATE_CONF_REG */
     WRITE_RTC_FIELD(SENS_SAR_PERI_CLK_GATE_CONF_REG, SENS_IOMUX_CLK_EN, 1);
 #endif
+
 
 	/* Lower 16 IOs and higher need to be handled separately,
 	 * because r0-r3 registers are 16 bit wide.
