@@ -77,20 +77,20 @@ entry:
     // Warte, bis das Update abgeschlossen ist
 //wait 10
     // Lese den unteren 32-Bit-Wert des Timers
-    READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 16)
-   //	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
+   // READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 16)
+   	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
 	move r1, r0
     move r2, timer_count_low  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
   // Lese den oberen 32-Bit-Wert des Timers
     //READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG , 16, 16)
-	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
+	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
 	move r1, r0
 	//move r1, 0x8
     move r2, timer_count_high  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
 
-	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
+	REG_RD DR_REG_RTCCNTL_BASE + 0x14, 15, 0
 	move r1, r0
 	//move r1, 0x8
     move r2, timer_count_upper  // Speichere adresse von variable in r2
