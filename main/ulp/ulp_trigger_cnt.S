@@ -63,6 +63,10 @@ timer_count_low:
 timer_count_high:
 	.long 0
 
+	.global timer_count_upper
+timer_count_upper:
+	.long 0
+
 	/* Code goes into .text section */
 	.text
 	.global entry
@@ -70,104 +74,33 @@ entry:
 	
 	    // Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
-	    // Warte, bis das Update abgeschlossen ist
-
+    // Warte, bis das Update abgeschlossen ist
+//wait 10
     // Lese den unteren 32-Bit-Wert des Timers
-    READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 32)
+    READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 16)
+   //	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
 	move r1, r0
     move r2, timer_count_low  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
   // Lese den oberen 32-Bit-Wert des Timers
-    READ_RTC_REG(RTC_CNTL_TIME_HIGH0_REG , 0, 16)
+    //READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG , 16, 16)
+	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
 	move r1, r0
+	//move r1, 0x8
     move r2, timer_count_high  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
 
-	
-	/* Load io_number */
-	move r3, io_number
-	ld r3, r3, 0
-
-#if CONFIG_IDF_TARGET_ESP32S2
-    /* ESP32S2 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_IO_MUX_CONF_REG */
-	WRITE_RTC_FIELD(SENS_SAR_IO_MUX_CONF_REG, SENS_IOMUX_CLK_GATE_EN, 1)
-#elif CONFIG_IDF_TARGET_ESP32S3
-    /* ESP32S3 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_PERI_CLK_GATE_CONF_REG */
-    WRITE_RTC_FIELD(SENS_SAR_PERI_CLK_GATE_CONF_REG, SENS_IOMUX_CLK_EN, 1);
-#endif
+	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
+	move r1, r0
+	//move r1, 0x8
+    move r2, timer_count_upper  // Speichere adresse von variable in r2
+	st r1, r2, 0 //speichere r1 in der variablen
 
 
-	/* Lower 16 IOs and higher need to be handled separately,
-	 * because r0-r3 registers are 16 bit wide.
-	 * Check which IO this is.
-	 */
-	move r0, r3
-	jumpr read_io_high, 16, ge
 
-	/* Read the value of lower 16 RTC IOs into R0 */
-	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
-	rsh r0, r0, r3
-	jump read_done
 
-	/* Read the value of RTC IOs 16-17, into R0 */
-read_io_high:
-	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S + 16, 2)
-	sub r3, r3, 16
-	rsh r0, r0, r3
-
-read_done:
-	and r0, r0, 1
-	/* State of input changed? */
-	move r3, next_edge
-	ld r3, r3, 0
-	add r3, r0, r3
-	and r3, r3, 1
-	jump changed, eq
-	/* Not changed */
-	/* Reset debounce_counter to debounce_max_count */
-	move r3, debounce_max_count
-	move r2, debounce_counter
-	ld r3, r3, 0
-	st r3, r2, 0
 	/* End program */
+	wake
 	halt
 
-	.global changed
-changed:
-	/* Input state changed */
-	/* Has debounce_counter reached zero? */
-	move r3, debounce_counter
-	ld r2, r3, 0
-	add r2, r2, 0 /* dummy ADD to use "jump if ALU result is zero" */
-	jump edge_detected, eq
-	/* Not yet. Decrement debounce_counter */
-	sub r2, r2, 1
-	st r2, r3, 0
-	/* End program */
-	halt
 
-	.global edge_detected
-edge_detected:
-	/* Reset debounce_counter to debounce_max_count */
-	move r3, debounce_max_count
-	move r2, debounce_counter
-	ld r3, r3, 0
-	st r3, r2, 0
-	/* Flip next_edge */
-	move r3, next_edge
-	ld r2, r3, 0
-	add r2, r2, 1
-	and r2, r2, 1
-	st r2, r3, 0
-	/* Increment edge_count */
-	move r3, edge_count
-	ld r2, r3, 0
-	add r2, r2, 1
-	st r2, r3, 0
-	/* Compare edge_count to edge_count_to_wake_up */
-	move r3, edge_count_to_wake_up
-	ld r3, r3, 0
-	sub r3, r3, r2
-	jump wake_up, eq
-	/* Not yet. End program */
-	halt
