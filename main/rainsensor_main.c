@@ -54,7 +54,6 @@ extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
 
 // forward declarations
 static void init_ulp_program(void);
-static void update_pulse_count(void);
 static void update_timer_count(void);
 static void configure_led(void);
 static led_strip_handle_t led_strip;
@@ -130,7 +129,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.3.1\n\n");
+    printf("rainsensor V0.6.3.3\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
@@ -155,7 +154,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
     // wait some time to get a chance to call interrupt from usp instead of wakeup
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    //vTaskDelay(pdMS_TO_TICKS(10000));
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
     esp_deep_sleep_start();
@@ -210,39 +209,13 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 1000);
+    ulp_set_wakeup_period(0, 100);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
     ESP_ERROR_CHECK(err);
 }
 
-static void update_pulse_count(void)
-{
-    const char *nvs_namespace = "plusecnt";
-    const char *count_key = "count";
-    ;
-    ESP_ERROR_CHECK(nvs_flash_init());
-    nvs_handle_t handle;
-    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
-    uint32_t pulse_count = 0;
-    esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
-    assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    printf("Read pulse count from NVS: %5" PRIu32 "\n", pulse_count);
-
-    /* ULP program counts signal edges, convert that to the number of pulses */
-    uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
-    /* In case of an odd number of edges, keep one until next time */
-    ulp_edge_count = ulp_edge_count % 2;
-    printf("Pulse count from ULP: %5" PRIu32 "\n", pulse_count_from_ulp);
-    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-    /* Save the new pulse count to NVS */
-    pulse_count += pulse_count_from_ulp;
-    ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
-    ESP_ERROR_CHECK(nvs_commit(handle));
-    nvs_close(handle);
-    printf("Wrote updated pulse count to NVS: %5" PRIu32 "\n", pulse_count);
-}
 
 static void update_timer_count(void)
 {
