@@ -66,7 +66,6 @@ void signal_from_ulp()
     ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
     interrupt_count++;
     printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-    update_pulse_count();
     update_timer_count();
 }
 
