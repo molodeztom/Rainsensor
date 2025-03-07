@@ -130,17 +130,16 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.2.2\n\n");
+    printf("rainsensor V0.6.3.1\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
     configure_led();
-    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-
+    
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-    setup_ulp_interrupt();
+   // setup_ulp_interrupt();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
@@ -150,7 +149,7 @@ void app_main(void)
     else
     {
         printf("ULP wakeup, saving pulse count\n");
-        update_pulse_count();
+        //update_pulse_count();
         update_timer_count();
     }
 
@@ -261,6 +260,9 @@ static void update_timer_count(void)
 
     uint32_t timer_count_high_from_ulp = (ulp_timer_count_high & UINT16_MAX) ;
     printf("timer count high from ULP: %5" PRIu32 "\n", timer_count_high_from_ulp);
+
+    uint32_t timer_count_upper_from_ulp = (ulp_timer_count_upper & UINT16_MAX) ;
+    printf("timer count upper from ULP: %5" PRIu32 "\n", timer_count_upper_from_ulp);
    
     nvs_close(handle);
   
