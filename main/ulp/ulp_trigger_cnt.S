@@ -55,8 +55,12 @@ edge_count_to_wake_up:
 io_number:
 	.long 0
 
-	.global timer_count
-timer_count:
+	.global timer_count_low
+timer_count_low:
+	.long 0
+
+	.global timer_count_high
+timer_count_high:
 	.long 0
 
 	/* Code goes into .text section */
@@ -71,8 +75,14 @@ entry:
     // Lese den unteren 32-Bit-Wert des Timers
     READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 32)
 	move r1, r0
-    move r2, timer_count  // Speichere adresse von variable in r1
-	st r1, r2, 0 //speichere r0 in der variablen
+    move r2, timer_count_low  // Speichere adresse von variable in r2
+	st r1, r2, 0 //speichere r1 in der variablen
+  // Lese den oberen 32-Bit-Wert des Timers
+    READ_RTC_REG(RTC_CNTL_TIME_HIGH0_REG , 0, 16)
+	move r1, r0
+    move r2, timer_count_high  // Speichere adresse von variable in r2
+	st r1, r2, 0 //speichere r1 in der variablen
+
 	
 	/* Load io_number */
 	move r3, io_number
