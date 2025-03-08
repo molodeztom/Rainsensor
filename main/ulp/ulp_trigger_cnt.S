@@ -119,7 +119,7 @@ entry:
 	st r1, r2, 0 //speichere r1 in der variablen
 
 	//initialize start time on first run 
-//	move r2 start_time_low_l
+	move r2 start_time_low_l
 //	ld r1,r2, 0
 	//jump start_time_initialized, 1, gt
 
