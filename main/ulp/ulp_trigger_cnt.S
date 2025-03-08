@@ -96,11 +96,7 @@ entry:
     move r2, timer_count_upper  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
 
-
-
-
 	/* End program */
-	wake
-	halt
+jump wake_up
 
 

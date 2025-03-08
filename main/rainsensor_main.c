@@ -24,6 +24,8 @@ RainSensor
   20250225  V0.5.2B: Stack Size erhöht, unnötigen Code entfernt. Funktioniert so gut.
   20250227  V0.6.3.3 Timer  Only:  3 Variablen um die Timer werte zu zeigen. Zählt sauber hoch.
   20250308  V0.6.3.4        Calculate time from 3 variables
+  20250308  V0.6.3.5        Print Time in hh:mm:ss
+  20250308  V0.6.3.6        ulp wakeup time longer, call wakeup from wake_up.S File
 
   */
 
@@ -49,6 +51,7 @@ RainSensor
 // definitions
 static const char *TAG = "rainsens";
 #define BLINK_GPIO CONFIG_BLINK_GPIO
+#define RTC_SLOW_CLK_FREQ 136000
 
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
@@ -58,6 +61,8 @@ extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
 static void init_ulp_program(void);
 static void update_timer_count(void);
 static void configure_led(void);
+uint32_t calculate_time_ms(uint64_t ticks);
+void format_time(uint32_t ms, int* hours, int* minutes, int* seconds);
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -131,7 +136,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.3.3\n\n");
+    printf("rainsensor V0.6.3.6\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
@@ -212,7 +217,7 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 100);
+    ulp_set_wakeup_period(0, 2720000);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
@@ -246,8 +251,35 @@ static void update_timer_count(void)
     (uint32_t)ulp_TIMER_LOW_L;
     printf("ULP Timerwert: %llu Ticks\n", timer_value);
 
+    uint32_t ms = calculate_time_ms(timer_value);
+
+    // Convert milliseconds to hours, minutes, and seconds
+    int hours, minutes, seconds;
+    format_time(ms, &hours, &minutes, &seconds);
+
+    // Output the elapsed time in milliseconds
+    printf("Elapsed Time: %lu milliseconds\n", ms);
+
+    // Output the elapsed time in h:mm:ss format
+    printf("Elapsed Time: %02d:%02d:%02d\n", hours, minutes, seconds);
+
     
 }
+
+// Function to calculate the elapsed time in milliseconds
+uint32_t calculate_time_ms(uint64_t ticks) {
+    // Each tick corresponds to approximately 6.67 microseconds, so we use the formula to convert ticks to milliseconds.
+    // Calculation in milliseconds: (Ticks / RTC_SLOW_CLK_FREQ) * 1000
+    return (uint32_t)((ticks * 1000) / RTC_SLOW_CLK_FREQ); // Ticks -> milliseconds
+}
+
+// Function to convert milliseconds into hours, minutes, and seconds
+void format_time(uint32_t ms, int* hours, int* minutes, int* seconds) {
+    *hours = ms / 3600000;           // Calculate hours (ms / 3600000)
+    *minutes = (ms % 3600000) / 60000;  // Calculate minutes ((ms % 3600000) / 60000)
+    *seconds = (ms % 60000) / 1000;   // Calculate seconds ((ms % 60000) / 1000)
+}
+
 
 
 
