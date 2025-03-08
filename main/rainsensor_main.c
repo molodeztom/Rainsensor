@@ -211,6 +211,12 @@ static void update_timer_count(void)
     uint32_t ulp_START_TIME_LOW_L = (ulp_start_time_low_l & UINT16_MAX);
     printf("start_time_low_l: %5" PRIu32 "\n", ulp_START_TIME_LOW_L);
 
+    uint32_t ulp_START_TIME_LOW_H = (ulp_start_time_low_h & UINT16_MAX);
+    printf("start_time_low_h: %5" PRIu32 "\n", ulp_START_TIME_LOW_H);
+
+    uint32_t ulp_START_TIME_HIGH = (ulp_start_time_high & UINT16_MAX);
+    printf("start_time_high: %5" PRIu32 "\n", ulp_START_TIME_HIGH);
+
     nvs_close(handle);
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |

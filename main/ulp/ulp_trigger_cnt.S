@@ -124,13 +124,26 @@ entry:
 	//initialize start time on first run 
 	move r2, start_time_low_l
 	ld r0,r2, 0
-	jumpr start_time_initialized, 30000, gt
+	jumpr start_time_initialized, 1, gt
 	//copy timer low_l to start time_low_l
     move r1, timer_count_low_l
     ld r0, r1, 0
-  //move r0, 43
-  move r2, start_time_low_l
- st r0, r2, 0
+    move r2, start_time_low_l
+    st r0, r2, 0
+
+	//copy timer low_h to start time_low_h
+    move r1, timer_count_low_h
+    ld r0, r1, 0
+    move r2, start_time_low_h
+    st r0, r2, 0
+
+	//copy timer high to start 
+    move r1, timer_count_high
+    ld r0, r1, 0
+    move r2, start_time_high
+    st r0, r2, 0
+  
+  
   jump wake_up
 
 
