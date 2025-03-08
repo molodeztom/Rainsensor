@@ -51,8 +51,8 @@ RainSensor
 // definitions
 static const char *TAG = "rainsens";
 #define BLINK_GPIO CONFIG_BLINK_GPIO
-#define RTC_SLOW_CLK_FREQ 136000
-
+#define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
+//#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -63,19 +63,16 @@ static void update_timer_count(void);
 static void configure_led(void);
 uint32_t calculate_time_ms(uint64_t ticks);
 void format_time(uint32_t ms, int* hours, int* minutes, int* seconds);
+void signal_from_ulp();
+
+void ulp_task(void *arg);
+void setup_ulp_interrupt();
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
 
-void signal_from_ulp()
-{
-    ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
-    interrupt_count++;
-    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-    update_timer_count();
-}
 
 static void IRAM_ATTR ulp_isr_handler(void *arg)
 {
@@ -88,44 +85,7 @@ static void IRAM_ATTR ulp_isr_handler(void *arg)
     }
 }
 
-void ulp_task(void *arg)
-{
-    while (1)
-    {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Warte auf Benachrichtigung
-        printf("Task notified \n");
-        size_t freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-        printf("Free Memory: %d bytes\n", freeMemory);
-        // Überprüfe den Stack-Verbrauch
-        UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
-        printf("Stack High Water Mark: %d\n", highWaterMark);
-        signal_from_ulp(); // Führe die spezifische Funktion aus
-        led_strip_set_pixel(led_strip, 0, 0, 0, 200);
-        /* Refresh the strip to send data */
-        led_strip_refresh(led_strip); // Überprüfe den freien Speicher
 
-        freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-        printf("Free Memory: %d bytes\n", freeMemory);
-        // Überprüfe den Stack-Verbrauch
-        highWaterMark = uxTaskGetStackHighWaterMark(NULL);
-        printf("Stack High Water Mark: %d\n", highWaterMark);
-    }
-}
-
-void setup_ulp_interrupt()
-{
-    esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M, ESP_INTR_FLAG_IRAM);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to register ULP interrupt handler: %s", esp_err_to_name(err));
-        return;
-    }
-    ESP_LOGI(TAG, "Create ulp_task");
-    xTaskCreate(ulp_task, "ulp_task", 4096, NULL, 5, &ulp_task_handle);
-    // ULP-Interrupt aktivieren, required!
-    SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
-    ESP_LOGI(TAG, "ULP interrupt enabled");
-}
 
 void app_main(void)
 {
@@ -217,7 +177,7 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 13000000);
+    ulp_set_wakeup_period(0, 500000);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
@@ -281,7 +241,52 @@ void format_time(uint32_t ms, int* hours, int* minutes, int* seconds) {
 }
 
 
+void signal_from_ulp()
+{
+    ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
+    interrupt_count++;
+    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
+    update_timer_count();
+}
 
+void ulp_task(void *arg)
+{
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Warte auf Benachrichtigung
+        printf("Task notified \n");
+        size_t freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+        printf("Free Memory: %d bytes\n", freeMemory);
+        // Überprüfe den Stack-Verbrauch
+        UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
+        printf("Stack High Water Mark: %d\n", highWaterMark);
+        signal_from_ulp(); // Führe die spezifische Funktion aus
+        led_strip_set_pixel(led_strip, 0, 0, 0, 200);
+        /* Refresh the strip to send data */
+        led_strip_refresh(led_strip); // Überprüfe den freien Speicher
+
+        freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+        printf("Free Memory: %d bytes\n", freeMemory);
+        // Überprüfe den Stack-Verbrauch
+        highWaterMark = uxTaskGetStackHighWaterMark(NULL);
+        printf("Stack High Water Mark: %d\n", highWaterMark);
+    }
+}
+
+void setup_ulp_interrupt()
+{
+    esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M, ESP_INTR_FLAG_IRAM);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to register ULP interrupt handler: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "Create ulp_task");
+    xTaskCreate(ulp_task, "ulp_task", 4096, NULL, 5, &ulp_task_handle);
+    // ULP-Interrupt aktivieren, required!
+    SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
+    ESP_LOGI(TAG, "ULP interrupt enabled");
+}
 
 static void configure_led(void)
 {

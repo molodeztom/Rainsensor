@@ -69,13 +69,17 @@ timer_count_upper:
 
 	/* Code goes into .text section */
 	.text
+
 	.global entry
 entry:
-	
-	    // Setze das Update-Bit, um das Ticks-Register zu aktualisieren
+
+
+	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
     // Warte, bis das Update abgeschlossen ist
-//wait 10
+	wait 10
+
+
     // Lese den unteren 32-Bit-Wert des Timers
    // READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 16)
    	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
