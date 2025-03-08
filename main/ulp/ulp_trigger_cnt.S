@@ -77,7 +77,7 @@ entry:
 	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
     // Warte, bis das Update abgeschlossen ist
-	wait 10
+	//wait 10
 
 
     // Lese den unteren 32-Bit-Wert des Timers
