@@ -55,17 +55,42 @@ edge_count_to_wake_up:
 io_number:
 	.long 0
 
-	.global timer_count_low
-timer_count_low:
+	.global timer_count_low_l
+timer_count_low_l:
+	.long 0
+
+	.global timer_count_low_h
+timer_count_low_h:
 	.long 0
 
 	.global timer_count_high
 timer_count_high:
 	.long 0
 
-	.global timer_count_upper
-timer_count_upper:
+/* Startzeit (48-Bit-Zeitstempel) */
+	.global start_time_low_l
+start_time_low:
 	.long 0
+
+	.global start_time_low_h
+start_time_low_h:
+	.long 0
+
+	.global start_time_high
+start_time_high:
+	.long 0
+
+	/* Aktueller Zeitstempel (64-Bit) */
+	.global current_time_low
+current_time_low:
+	.long 0
+
+	.global current_time_high
+current_time_high:
+	.long 0
+
+
+
 
 	/* Code goes into .text section */
 	.text
@@ -76,29 +101,30 @@ entry:
 
 	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
-    // Warte, bis das Update abgeschlossen ist
-	//wait 10
-
-
-    // Lese den unteren 32-Bit-Wert des Timers
-   // READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG, 0, 16)
+	//read timer value in ms 48 bit
+    // read lower 16 bit RTC_CNTL_TIME_LOW0_REG
    	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
 	move r1, r0
-    move r2, timer_count_low  // Speichere adresse von variable in r2
+    move r2, timer_count_low_l  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
-  // Lese den oberen 32-Bit-Wert des Timers
-    //READ_RTC_REG(RTC_CNTL_TIME_LOW0_REG , 16, 16)
+  // read upper 16 bit timer RTC_CNTL_TIME_LOW0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
 	move r1, r0
-	//move r1, 0x8
+    move r2, timer_count_low_h  // Speichere adresse von variable in r2
+	st r1, r2, 0 //speichere r1 in der variablen
+ // read lower 16 Bit RTC_CNTL_TIME_HIGH0_REG
+	REG_RD DR_REG_RTCCNTL_BASE + 0x14, 15, 0
+	move r1, r0
     move r2, timer_count_high  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
 
-	REG_RD DR_REG_RTCCNTL_BASE + 0x14, 15, 0
-	move r1, r0
-	//move r1, 0x8
-    move r2, timer_count_upper  // Speichere adresse von variable in r2
-	st r1, r2, 0 //speichere r1 in der variablen
+	//initialize start time on first run 
+//	move r2 start_time_low_l
+//	ld r1,r2, 0
+	//jump start_time_initialized, 1, gt
+
+//start_time_initialized
+
 
 	/* End program */
 jump wake_up

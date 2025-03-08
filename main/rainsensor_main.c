@@ -153,7 +153,8 @@ static void init_ulp_program(void)
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 10;
-    ulp_timer_count_low = 0;
+    ulp_timer_count_low_l = 0;
+    ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
@@ -195,13 +196,13 @@ static void update_timer_count(void)
     uint32_t timer_count = 1;
     esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    uint32_t ulp_TIMER_LOW_L = (ulp_timer_count_low & UINT16_MAX);
+    uint32_t ulp_TIMER_LOW_L = (ulp_timer_count_low_l & UINT16_MAX);
     printf("timer count low from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_L);
 
-    uint32_t ulp_TIMER_LOW_H = (ulp_timer_count_high & UINT16_MAX);
+    uint32_t ulp_TIMER_LOW_H = (ulp_timer_count_low_h & UINT16_MAX);
     printf("timer count high from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_H);
 
-    uint32_t ulp_TIMER_HIGH = (ulp_timer_count_upper & UINT16_MAX);
+    uint32_t ulp_TIMER_HIGH = (ulp_timer_count_high & UINT16_MAX);
     printf("timer count upper from ULP: %5" PRIu32 "\n", ulp_TIMER_HIGH);
 
     nvs_close(handle);
