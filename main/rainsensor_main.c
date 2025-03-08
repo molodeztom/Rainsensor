@@ -21,8 +21,10 @@ RainSensor
   20250214  V0.4 Interrupt Test
   20250215  V0.5B: ISR registered usw.
   20250216  V0.5.1B: Zählt mit und ohne laufender CPU allerdings müsste man sicherheitshalber die überprüfungen in wake up wieder einschalten
-  20250225  V0.5.2B: Stack Size erhöht, unnötigen Code entfernt. Funktioniert so gut. 
-  20250227  V0.6
+  20250225  V0.5.2B: Stack Size erhöht, unnötigen Code entfernt. Funktioniert so gut.
+  20250227  V0.6.3.3 Timer  Only:  3 Variablen um die Timer werte zu zeigen. Zählt sauber hoch.
+  20250308  V0.6.3.4        Calculate time from 3 variables
+
   */
 
 #include <stdio.h>
@@ -56,6 +58,7 @@ extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
 static void init_ulp_program(void);
 static void update_timer_count(void);
 static void configure_led(void);
+
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
 
@@ -133,11 +136,11 @@ void app_main(void)
 
     /* Configure the peripheral according to the LED type */
     configure_led();
-    
+
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-   // setup_ulp_interrupt();
+    // setup_ulp_interrupt();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
@@ -147,13 +150,14 @@ void app_main(void)
     else
     {
         printf("ULP wakeup, saving pulse count\n");
-        //update_pulse_count();
+        // update_pulse_count();
         update_timer_count();
     }
 
+
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
     // wait some time to get a chance to call interrupt from usp instead of wakeup
-    //vTaskDelay(pdMS_TO_TICKS(10000));
+    // vTaskDelay(pdMS_TO_TICKS(10000));
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
     esp_deep_sleep_start();
@@ -215,7 +219,6 @@ static void init_ulp_program(void)
     ESP_ERROR_CHECK(err);
 }
 
-
 static void update_timer_count(void)
 {
     const char *nvs_namespace = "plusecnt";
@@ -227,18 +230,26 @@ static void update_timer_count(void)
     uint32_t timer_count = 1;
     esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    uint32_t timer_count_low_from_ulp = (ulp_timer_count_low & UINT16_MAX) ;
-    printf("timer count low from ULP: %5" PRIu32 "\n", timer_count_low_from_ulp);
+    uint32_t ulp_TIMER_LOW_L = (ulp_timer_count_low & UINT16_MAX);
+    printf("timer count low from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_L);
 
-    uint32_t timer_count_high_from_ulp = (ulp_timer_count_high & UINT16_MAX) ;
-    printf("timer count high from ULP: %5" PRIu32 "\n", timer_count_high_from_ulp);
+    uint32_t ulp_TIMER_LOW_H = (ulp_timer_count_high & UINT16_MAX);
+    printf("timer count high from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_H);
 
-    uint32_t timer_count_upper_from_ulp = (ulp_timer_count_upper & UINT16_MAX) ;
-    printf("timer count upper from ULP: %5" PRIu32 "\n", timer_count_upper_from_ulp);
-   
+    uint32_t ulp_TIMER_HIGH = (ulp_timer_count_upper & UINT16_MAX);
+    printf("timer count upper from ULP: %5" PRIu32 "\n", ulp_TIMER_HIGH);
+
     nvs_close(handle);
-  
+
+    uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
+    ((uint32_t)ulp_TIMER_LOW_H << 16) |
+    (uint32_t)ulp_TIMER_LOW_L;
+    printf("ULP Timerwert: %llu Ticks\n", timer_value);
+
+    
 }
+
+
 
 static void configure_led(void)
 {
