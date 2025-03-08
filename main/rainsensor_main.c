@@ -96,7 +96,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.3.6\n\n");
+    printf("rainsensor V0.6.3.7\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
@@ -157,6 +157,9 @@ static void init_ulp_program(void)
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
 
+    ulp_start_time_low_l = 0;
+
+
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
     rtc_gpio_set_direction(gpio_num, RTC_GPIO_MODE_INPUT_ONLY);
@@ -204,6 +207,9 @@ static void update_timer_count(void)
 
     uint32_t ulp_TIMER_HIGH = (ulp_timer_count_high & UINT16_MAX);
     printf("timer count upper from ULP: %5" PRIu32 "\n", ulp_TIMER_HIGH);
+
+    uint32_t ulp_START_TIME_LOW_L = (ulp_start_time_low_l & UINT16_MAX);
+    printf("start_time_low_l: %5" PRIu32 "\n", ulp_START_TIME_LOW_L);
 
     nvs_close(handle);
 

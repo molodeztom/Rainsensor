@@ -69,7 +69,7 @@ timer_count_high:
 
 /* Startzeit (48-Bit-Zeitstempel) */
 	.global start_time_low_l
-start_time_low:
+start_time_low_l:
 	.long 0
 
 	.global start_time_low_h
@@ -97,7 +97,10 @@ current_time_high:
 
 	.global entry
 entry:
-
+// Test start_time_low_l auf 0 setzen
+ // move r0, 5
+ // move r2, start_time_low_l
+ // st r0, r2, 0
 
 	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
@@ -119,11 +122,22 @@ entry:
 	st r1, r2, 0 //speichere r1 in der variablen
 
 	//initialize start time on first run 
-	move r2 start_time_low_l
-//	ld r1,r2, 0
-	//jump start_time_initialized, 1, gt
+	move r2, start_time_low_l
+	ld r0,r2, 0
+	jumpr start_time_initialized, 30000, gt
+	//copy timer low_l to start time_low_l
+    move r1, timer_count_low_l
+    ld r0, r1, 0
+  //move r0, 43
+  move r2, start_time_low_l
+ st r0, r2, 0
+  jump wake_up
 
-//start_time_initialized
+
+start_time_initialized:
+	move r0, 45
+	move r2, start_time_low_l
+	//st r0, r2, 0
 
 
 	/* End program */
