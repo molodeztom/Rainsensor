@@ -113,8 +113,13 @@ entry:
   // read upper 16 bit timer RTC_CNTL_TIME_LOW0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
 	move r1, r0
+	//TEST TODO remove: To provoke overflow we add a constant 65000
+	//add r1, r1, 65400
     move r2, timer_count_low_h  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
+
+
+
  // read lower 16 Bit RTC_CNTL_TIME_HIGH0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x14, 15, 0
 	move r1, r0
@@ -147,9 +152,6 @@ initialize_start_time:
     move r2, start_time_high
     st r0, r2, 0
   
-  
-  jump end_program
-
 
 start_time_initialized:
 //compare timer low_h with max time
@@ -161,7 +163,7 @@ start_time_initialized:
 	//check: overflow and jump to time is up causing increment pulse timer always
 	jump fixed_pulse, ov
 	jumpr time_is_up, 100, gt
-	jump end_program
+	halt
 
 fixed_pulse:
 	//set pulse to 999 so we find it later in the log and set start time to timer again
@@ -181,9 +183,28 @@ time_is_up:
 	ld r1, r0, 0
 	add r2, r1, 1
 	st r2,  r0, 0
-
+	
 //reset start time to current value
-	jump initialize_start_time
+//copy timer low_h to start time_low_h
+
+    move r1, timer_count_low_l
+    ld r0, r1, 0
+    move r2, start_time_low_l
+    st r0, r2, 0
+
+	//copy timer low_h to start time_low_h
+    move r1, timer_count_low_h
+    ld r0, r1, 0
+    move r2, start_time_low_h
+    st r0, r2, 0
+
+	//copy timer high to start 
+    move r1, timer_count_high
+    ld r0, r1, 0
+    move r2, start_time_high
+    st r0, r2, 0
+	jump end_program
+	
 
 end_program:
 	/* End program */
