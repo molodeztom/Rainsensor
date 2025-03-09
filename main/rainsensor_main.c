@@ -181,7 +181,7 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 500000);
+    ulp_set_wakeup_period(0, 500);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
@@ -216,6 +216,9 @@ static void update_timer_count(void)
 
     uint32_t ulp_START_TIME_HIGH = (ulp_start_time_high & UINT16_MAX);
     printf("start_time_high: %5" PRIu32 "\n", ulp_START_TIME_HIGH);
+
+    uint32_t ulp_PULSE_COUNT = (ulp_pulse_count & UINT16_MAX);
+    printf("pulse_count: %5" PRIu32 "\n", ulp_PULSE_COUNT);
 
     nvs_close(handle);
 

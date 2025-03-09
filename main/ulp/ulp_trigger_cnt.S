@@ -55,6 +55,10 @@ edge_count_to_wake_up:
 io_number:
 	.long 0
 
+	.global pulse_count
+pulse_count:
+	.long 0
+
 	.global timer_count_low_l
 timer_count_low_l:
 	.long 0
@@ -121,10 +125,14 @@ entry:
     move r2, timer_count_high  // Speichere adresse von variable in r2
 	st r1, r2, 0 //speichere r1 in der variablen
 
-	//initialize start time on first run 
+	//initialize start time on first run check if start time has a value > 1
+	//first time it will be 0
 	move r2, start_time_low_l
 	ld r0,r2, 0
 	jumpr start_time_initialized, 1, gt
+
+initialize_start_time:
+
 	//copy timer low_l to start time_low_l
     move r1, timer_count_low_l
     ld r0, r1, 0
@@ -144,16 +152,32 @@ entry:
     st r0, r2, 0
   
   
-  jump wake_up
+  jump end_program
 
 
 start_time_initialized:
-	move r0, 45
-	move r2, start_time_low_l
-	//st r0, r2, 0
+//compare timer low_h with max time
+    move r1, timer_count_low_h
+    ld r1, r1, 0
+    move r2, start_time_low_h
+	ld r2, r2, 0
+	sub r0, r1, r2
+	jumpr time_is_up, 100, gt
+	jump end_program
 
+time_is_up:
+//time is over max time
+// increment test pulse count
+	move r0, pulse_count
+	ld r1, r0, 0
+	add r2, r1, 1
+	st r2,  r0, 0
 
+//reset start time to current value
+	jump initialize_start_time
+
+end_program:
 	/* End program */
-jump wake_up
+	jump wake_up
 
 
