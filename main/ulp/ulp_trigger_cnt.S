@@ -49,6 +49,10 @@ edge_count:
 edge_count_to_wake_up:
 	.long 0
 
+	.global time_to_wake_CPU
+time_to_wake_CPU:
+	.long 0	
+
 	/* RTC IO number used to sample the input signal.
 	   Set by main program. */
 	.global io_number
@@ -59,10 +63,6 @@ io_number:
 pulse_count:
 	.long 0
 
-	.global timer_count_low_l
-timer_count_low_l:
-	.long 0
-
 	.global timer_count_low_h
 timer_count_low_h:
 	.long 0
@@ -71,10 +71,7 @@ timer_count_low_h:
 timer_count_high:
 	.long 0
 
-/* Startzeit (48-Bit-Zeitstempel) */
-	.global start_time_low_l
-start_time_low_l:
-	.long 0
+/* start time (48-Bit-timestamp, lower 16 bits not used) */
 
 	.global start_time_low_h
 start_time_low_h:
@@ -84,13 +81,16 @@ start_time_low_h:
 start_time_high:
 	.long 0
 
-	/* Aktueller Zeitstempel (64-Bit) */
-	.global current_time_low
+.global current_time_low
 current_time_low:
 	.long 0
 
 	.global current_time_high
 current_time_high:
+	.long 0
+
+	.global test_div
+test_div:
 	.long 0
 
 
@@ -105,11 +105,13 @@ entry:
 	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
 	//read timer value in ms 48 bit
-    // read lower 16 bit RTC_CNTL_TIME_LOW0_REG
+    /* read lower 16 bit RTC_CNTL_TIME_LOW0_REG not needed
    	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
 	move r1, r0
-    move r2, timer_count_low_l  // Speichere adresse von variable in r2
-	st r1, r2, 0 //speichere r1 in der variablen
+    move r2, timer_count_low_l  
+	st r1, r2, 0 
+	*/
+
   // read upper 16 bit timer RTC_CNTL_TIME_LOW0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
 	move r1, r0
@@ -128,18 +130,13 @@ entry:
 
 	//initialize start time on first run check if start time has a value > 1
 	//first time it will be 0
-	move r2, start_time_low_l
+	move r2, start_time_low_h
 	ld r0,r2, 0
 	jumpr start_time_initialized, 1, gt
 
 initialize_start_time:
 
-	//copy timer low_l to start time_low_l
-    move r1, timer_count_low_l
-    ld r0, r1, 0
-    move r2, start_time_low_l
-    st r0, r2, 0
-
+	
 	//copy timer low_h to start time_low_h
     move r1, timer_count_low_h
     ld r0, r1, 0
@@ -185,12 +182,7 @@ time_is_up:
 	st r2,  r0, 0
 	
 //reset start time to current value
-//copy timer low_h to start time_low_h
 
-    move r1, timer_count_low_l
-    ld r0, r1, 0
-    move r2, start_time_low_l
-    st r0, r2, 0
 
 	//copy timer low_h to start time_low_h
     move r1, timer_count_low_h

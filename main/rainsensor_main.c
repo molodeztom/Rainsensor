@@ -54,6 +54,7 @@ static const char *TAG = "rainsens";
 #define BLINK_GPIO CONFIG_BLINK_GPIO
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 //#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
+#define ulp_wakeup_period 5000 //after ulp is halted it sleeps until next wakeup period
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -154,11 +155,12 @@ static void init_ulp_program(void)
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 10;
-    ulp_timer_count_low_l = 0;
+    ulp_time_to_wake_CPU = 100; //currently ticks
+    //ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
 
-    ulp_start_time_low_l = 0;
+  
 
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
@@ -181,8 +183,9 @@ static void init_ulp_program(void)
 
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
+     time in ms
      */
-    ulp_set_wakeup_period(0, 5000);
+    ulp_set_wakeup_period(0, ulp_wakeup_period);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
@@ -199,18 +202,16 @@ static void update_timer_count(void)
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     uint32_t timer_count = 1;
     esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
-    assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    uint32_t ulp_TIMER_LOW_L = (ulp_timer_count_low_l & UINT16_MAX);
-    printf("timer count low from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_L);
+ 
+
+    uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
+    printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
 
     uint32_t ulp_TIMER_LOW_H = (ulp_timer_count_low_h & UINT16_MAX);
     printf("timer count high from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_H);
 
     uint32_t ulp_TIMER_HIGH = (ulp_timer_count_high & UINT16_MAX);
     printf("timer count upper from ULP: %5" PRIu32 "\n", ulp_TIMER_HIGH);
-
-    uint32_t ulp_START_TIME_LOW_L = (ulp_start_time_low_l & UINT16_MAX);
-    printf("start_time_low_l: %5" PRIu32 "\n", ulp_START_TIME_LOW_L);
 
     uint32_t ulp_START_TIME_LOW_H = (ulp_start_time_low_h & UINT16_MAX);
     printf("start_time_low_h: %5" PRIu32 "\n", ulp_START_TIME_LOW_H);
@@ -221,11 +222,13 @@ static void update_timer_count(void)
     uint32_t ulp_PULSE_COUNT = (ulp_pulse_count & UINT16_MAX);
     printf("pulse_count: %5" PRIu32 "\n", ulp_PULSE_COUNT);
 
+    uint32_t ulp_TEST_DIV = (ulp_test_div & UINT16_MAX);
+    printf("Test Value: %5" PRIu32 "\n", ulp_TEST_DIV);
+
     nvs_close(handle);
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
-    ((uint32_t)ulp_TIMER_LOW_H << 16) |
-    (uint32_t)ulp_TIMER_LOW_L;
+    ((uint32_t)ulp_TIMER_LOW_H << 16);
     printf("ULP Timerwert: %llu Ticks\n", timer_value);
 
     uint32_t ms = calculate_time_ms(timer_value);
