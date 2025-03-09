@@ -101,10 +101,6 @@ current_time_high:
 
 	.global entry
 entry:
-// Test start_time_low_l auf 0 setzen
- // move r0, 5
- // move r2, start_time_low_l
- // st r0, r2, 0
 
 	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
@@ -162,8 +158,21 @@ start_time_initialized:
     move r2, start_time_low_h
 	ld r2, r2, 0
 	sub r0, r1, r2
+	//check: overflow and jump to time is up causing increment pulse timer always
+	jump fixed_pulse, ov
 	jumpr time_is_up, 100, gt
 	jump end_program
+
+fixed_pulse:
+	//set pulse to 999 so we find it later in the log and set start time to timer again
+	//we might loose the time difference 
+	move r0, pulse_count
+	move r1, 999
+	st r1, r0, 0
+	jump initialize_start_time
+
+no_overflow:
+
 
 time_is_up:
 //time is over max time

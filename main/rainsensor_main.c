@@ -26,6 +26,7 @@ RainSensor
   20250308  V0.6.3.4        Calculate time from 3 variables
   20250308  V0.6.3.5        Print Time in hh:mm:ss
   20250308  V0.6.3.6        ulp wakeup time longer, call wakeup from wake_up.S File
+  20260309  V0.6.3.8        Timer triggert einen test puls increment wenn die Zeit abgelaufen ist
 
   */
 
@@ -96,7 +97,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.3.7\n\n");
+    printf("rainsensor V0.6.3.8\n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
@@ -181,7 +182,7 @@ static void init_ulp_program(void)
     /* Set ULP wake up period to T = 20ms.
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      */
-    ulp_set_wakeup_period(0, 500);
+    ulp_set_wakeup_period(0, 50000);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
