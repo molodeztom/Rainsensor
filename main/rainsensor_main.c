@@ -29,6 +29,7 @@ RainSensor
   20250309  V0.6.3.8        Timer triggert einen test puls increment wenn die Zeit abgelaufen ist
   20250310  V0.6.3.9        interval to ulp via variable, subtraction in ulp using overflow to find when time is up
   20250310  V0.6.3.10       Clean code part one remove unneeded instructions reduce jump instructions
+  20250310  V0.6.4          Clean code use assembler subroutine, improved comments
 
   */
 
@@ -57,7 +58,7 @@ static const char *TAG = "rainsens";
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 //#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
 #define ulp_wakeup_period 5000 //after ulp is halted it sleeps until next wakeup period
-static const double wakeup_interval_seconds = 30; //time to wake cpu if at minimum one input pulse detected
+static const double wakeup_interval_seconds = 90; //time to wake cpu if at minimum one input pulse detected
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -103,7 +104,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.3.8\n\n");
+    printf("rainsensor V0.6.4 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */

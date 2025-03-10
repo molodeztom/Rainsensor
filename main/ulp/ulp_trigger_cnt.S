@@ -93,12 +93,14 @@ current_time_high:
 test_div:
 	.long 0
 
+return_address:
+	.long 0
 
 
-
-	/* Code goes into .text section */
+// --------------------------------
+// Main Program
+// --------------------------------
 	.text
-
 	.global entry
 entry:
 
@@ -114,35 +116,27 @@ entry:
     move r2, timer_count_low_h  
 	st r1, r2, 0 //store register in variable
 
-
  // read lower 16 Bit RTC_CNTL_TIME_HIGH0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x14, 15, 0
 	move r1, r0
     move r2, timer_count_high  
 	st r1, r2, 0 //store in variable
 
-	//initialize start time on first run check if start time has a value > 1
+	//initialize start time on first run
 	//first time it will be 0
 	move r2, start_time_low_h
 	ld r0,r2, 0
-	jumpr start_time_initialized, 1, gt
+	//if start time has a value > 1
+	jumpr start_time_initialized, 1, gt //If start_time_low_h > 1, skip initialization
+	// Store return address and jump to initialize_start_time
+	move r1, start_time_initialized
+	move r2, return_address
+	st r1, r2, 0
+	jump initialize_start_time
 
-initialize_start_time:
-	
-	//copy timer low_h to start time_low_h
-    move r1, timer_count_low_h
-    ld r0, r1, 0
-    move r2, start_time_low_h
-    st r0, r2, 0
-
-	//copy timer high to start 
-    move r1, timer_count_high
-    ld r0, r1, 0
-    move r2, start_time_high
-    st r0, r2, 0
-  
-//continue with comparison
-
+// --------------------------------
+// Timer Comparison Logic
+// --------------------------------
 start_time_initialized:
 //compare timer low_h with max time
     move r1, timer_count_low_h
@@ -160,13 +154,51 @@ start_time_initialized:
 	sub r0, r0, r3 //r0(Timer - start time) - r3 (time_to_wake_CPU) if negative will lead to an overflow
 	jump time_not_up, ov  //if timediff - time to wake < 0 time not up
 
-	//time is over max time increment test pulse count
+//--------------------------------------------------------------------------------
+    // Time is up: increment pulse_count and reset start time
 	move r0, pulse_count
 	ld r1, r0, 0
 	add r2, r1, 1
 	st r2,  r0, 0
-	
-	//reset start time to current value
+	//store return adress, in this case we end program
+	move r1, end_start_time_initialized
+	move r2, return_address
+	st r1, r2, 0
+	jump initialize_start_time
+
+end_start_time_initialized:	
+	jump end_program
+
+time_not_up:
+
+	halt  //nothing more to do start with next cyclus
+
+// Handle timer low_h overflow
+timer_low_h_overflow:
+	//TODO: remove: 
+	// Set pulse_count to 999 to indicate overflow
+	//we might loose the time difference it is not so important for just one interval
+	move r0, pulse_count
+	move r1, 999
+	st r1, r0, 0
+
+	// Reinitialize start time
+	//store return adress, in this case we continue
+	move r1, start_time_initialized
+	move r2, return_address
+	st r1, r2, 0
+	jump initialize_start_time
+
+end_program:
+	/* End program */
+	jump wake_up
+
+// Subroutine: Initialize start time
+// --------------------------------
+// Timer Initialization
+// --------------------------------
+initialize_start_time:
+	//set start  time to current time so we can calculate the new time interval from there
 	//copy timer low_h to start time_low_h
     move r1, timer_count_low_h
     ld r0, r1, 0
@@ -178,28 +210,11 @@ start_time_initialized:
     ld r0, r1, 0
     move r2, start_time_high
     st r0, r2, 0
-	jump end_program
 
-time_not_up:
+	//back to return adress dynamic is set by caller to simulate a function call
+	move r2, return_address
+	ld r1, r2, 0
+	jump r1
 
-	halt  //nothing more to do start with next cyclus
-
-timer_low_h_overflow:
-	//TODO: remove: set pulse to 999 so we find it later in the log and set start time to timer again
-	//we might loose the time difference it is not so important for just one interval
-	move r0, pulse_count
-	move r1, 999
-	st r1, r0, 0
-	jump initialize_start_time
-
-no_overflow:
-
-
-
-	
-
-end_program:
-	/* End program */
-	jump wake_up
 
 
