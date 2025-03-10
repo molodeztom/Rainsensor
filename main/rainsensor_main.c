@@ -26,7 +26,8 @@ RainSensor
   20250308  V0.6.3.4        Calculate time from 3 variables
   20250308  V0.6.3.5        Print Time in hh:mm:ss
   20250308  V0.6.3.6        ulp wakeup time longer, call wakeup from wake_up.S File
-  20260309  V0.6.3.8        Timer triggert einen test puls increment wenn die Zeit abgelaufen ist
+  20250309  V0.6.3.8        Timer triggert einen test puls increment wenn die Zeit abgelaufen ist
+  20250310  V0.6.3.9        interval to ulp via variable, subtraction in ulp using overflow to find when time is up
 
   */
 
@@ -55,6 +56,7 @@ static const char *TAG = "rainsens";
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 //#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
 #define ulp_wakeup_period 5000 //after ulp is halted it sleeps until next wakeup period
+static const double wakeup_interval_seconds = 120; //time to wake cpu if at minimum one input pulse detected
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -64,11 +66,13 @@ static void init_ulp_program(void);
 static void update_timer_count(void);
 static void configure_led(void);
 uint32_t calculate_time_ms(uint64_t ticks);
+uint64_t calculate_ticks_from_seconds(double seconds);
+uint16_t calculate_increments_for_interval(double interval_seconds);
 void format_time(uint32_t ms, int* hours, int* minutes, int* seconds);
 void signal_from_ulp();
-
 void ulp_task(void *arg);
 void setup_ulp_interrupt();
+
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -155,13 +159,18 @@ static void init_ulp_program(void)
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 10;
-    ulp_time_to_wake_CPU = 100; //currently ticks
     //ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
 
-  
+// Calculate the number of timer_count_low_h increments for the desired interval
+uint16_t increments = calculate_increments_for_interval(90);
 
+// Pass the increments value to the ULP program
+ulp_time_to_wake_CPU = increments;
+printf("Wake-up interval: %.2f seconds -> Increments: %u\n", wakeup_interval_seconds, increments);
+
+ printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
@@ -253,12 +262,31 @@ uint32_t calculate_time_ms(uint64_t ticks) {
     return (uint32_t)((ticks * 1000) / RTC_SLOW_CLK_FREQ); // Ticks -> milliseconds
 }
 
+uint64_t calculate_ticks_from_seconds(double seconds) {
+    // Convert seconds to ticks using the formula: Ticks = seconds * RTC_SLOW_CLK_FREQ
+    return (uint64_t)(seconds * RTC_SLOW_CLK_FREQ);
+}
+
 // Function to convert milliseconds into hours, minutes, and seconds
 void format_time(uint32_t ms, int* hours, int* minutes, int* seconds) {
     *hours = ms / 3600000;           // Calculate hours (ms / 3600000)
     *minutes = (ms % 3600000) / 60000;  // Calculate minutes ((ms % 3600000) / 60000)
     *seconds = (ms % 60000) / 1000;   // Calculate seconds ((ms % 60000) / 1000)
 }
+
+// Function to calculate the number of timer_count_low_h increments for a given interval
+uint16_t calculate_increments_for_interval(double interval_seconds) {
+ // Each timer_count_low_h increment corresponds to 65536 / 136000 ≈ 0.482 seconds
+ double increments = interval_seconds / (65536.0 / RTC_SLOW_CLK_FREQ);
+
+ // Manual rounding
+ if (increments - (uint16_t)increments >= 0.5) {
+     return (uint16_t)increments + 1;
+ } else {
+     return (uint16_t)increments;
+ }
+}
+
 
 
 void signal_from_ulp()
