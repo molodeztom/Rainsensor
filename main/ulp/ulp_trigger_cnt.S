@@ -176,11 +176,12 @@ time_not_up:
 // Handle timer low_h overflow
 timer_low_h_overflow:
 	//TODO: remove: 
-	// Set pulse_count to 999 to indicate overflow
+	// Set test value to number of overflows occured
 	//we might loose the time difference it is not so important for just one interval
-	move r0, pulse_count
-	move r1, 999
-	st r1, r0, 0
+	move r0, test_div
+	ld r1, r0, 0
+	add r2, r1, 1
+	st r2, r0, 0
 
 	// Reinitialize start time
 	//store return adress, in this case we continue
