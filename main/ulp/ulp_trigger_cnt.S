@@ -156,15 +156,34 @@ start_time_initialized:
     ld r1, r1, 0
     move r2, start_time_low_h
 	ld r2, r2, 0
-	sub r0, r1, r2
-	//check: overflow and jump to time is up causing increment pulse timer always
+	sub r0, r1, r2  //r0 = diff Timer - Start = ticks since interval start, 
+	//overflow may happen when timer count h exeeds 65535 -> 0 we get a negative result
+	//then jump to "time is up" to set Start on new timer value. 
+	//we might loose the time difference it is not so important for just one interval
 	jump fixed_pulse, ov
-	jumpr time_is_up, 100, gt
-	halt
+	//load interval from external variable
+	move r3, time_to_wake_CPU
+	ld r3, r3, 0
+	sub r0, r0, r3 //r0(Timer - start time) - r3 (time_to_wake_CPU) if negative will lead to an overflow
+	jump time_not_up, ov  //if timediff - time to wake < 0 time not up
+		//------------------------------
+	move r3, test_div 
+	st r0, r3, 0 //write sub result in test variable
+	//------------------------------
+	//jumpr time_is_up, 100, gt
+	/*move r3, test_div 
+	st r0, r3, 0 //write sub result in test variable*/
+	jump time_is_up
+
+time_not_up:
+	//------------------------------
+	move r3, test_div 
+	st r0, r3, 0 //write sub result in test variable
+	halt  //nothing more to do start with next cyclus
 
 fixed_pulse:
 	//set pulse to 999 so we find it later in the log and set start time to timer again
-	//we might loose the time difference 
+	//we might loose the time difference it is not so important for just one interval
 	move r0, pulse_count
 	move r1, 999
 	st r1, r0, 0
