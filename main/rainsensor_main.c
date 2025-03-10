@@ -28,6 +28,7 @@ RainSensor
   20250308  V0.6.3.6        ulp wakeup time longer, call wakeup from wake_up.S File
   20250309  V0.6.3.8        Timer triggert einen test puls increment wenn die Zeit abgelaufen ist
   20250310  V0.6.3.9        interval to ulp via variable, subtraction in ulp using overflow to find when time is up
+  20250310  V0.6.3.10       Clean code part one remove unneeded instructions reduce jump instructions
 
   */
 
@@ -56,7 +57,7 @@ static const char *TAG = "rainsens";
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 //#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
 #define ulp_wakeup_period 5000 //after ulp is halted it sleeps until next wakeup period
-static const double wakeup_interval_seconds = 120; //time to wake cpu if at minimum one input pulse detected
+static const double wakeup_interval_seconds = 30; //time to wake cpu if at minimum one input pulse detected
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -164,7 +165,7 @@ static void init_ulp_program(void)
     ulp_timer_count_high = 0;
 
 // Calculate the number of timer_count_low_h increments for the desired interval
-uint16_t increments = calculate_increments_for_interval(90);
+uint16_t increments = calculate_increments_for_interval(wakeup_interval_seconds);
 
 // Pass the increments value to the ULP program
 ulp_time_to_wake_CPU = increments;

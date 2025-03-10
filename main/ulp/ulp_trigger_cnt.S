@@ -102,31 +102,24 @@ test_div:
 	.global entry
 entry:
 
-	// Setze das Update-Bit, um das Ticks-Register zu aktualisieren
+	// set update bit to get a new timestamp
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
-	//read timer value in ms 48 bit
-    /* read lower 16 bit RTC_CNTL_TIME_LOW0_REG not needed
-   	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 15, 0
-	move r1, r0
-    move r2, timer_count_low_l  
-	st r1, r2, 0 
-	*/
+// register is 48 bit organized in lowReg 32 bit and high reg 16 bit we need only lowReg upper 16 bits and high reg
 
   // read upper 16 bit timer RTC_CNTL_TIME_LOW0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
 	move r1, r0
 	//TEST TODO remove: To provoke overflow we add a constant 65000
 	//add r1, r1, 65400
-    move r2, timer_count_low_h  // Speichere adresse von variable in r2
-	st r1, r2, 0 //speichere r1 in der variablen
-
+    move r2, timer_count_low_h  
+	st r1, r2, 0 //store register in variable
 
 
  // read lower 16 Bit RTC_CNTL_TIME_HIGH0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x14, 15, 0
 	move r1, r0
-    move r2, timer_count_high  // Speichere adresse von variable in r2
-	st r1, r2, 0 //speichere r1 in der variablen
+    move r2, timer_count_high  
+	st r1, r2, 0 //store in variable
 
 	//initialize start time on first run check if start time has a value > 1
 	//first time it will be 0
@@ -135,7 +128,6 @@ entry:
 	jumpr start_time_initialized, 1, gt
 
 initialize_start_time:
-
 	
 	//copy timer low_h to start time_low_h
     move r1, timer_count_low_h
@@ -149,6 +141,7 @@ initialize_start_time:
     move r2, start_time_high
     st r0, r2, 0
   
+//continue with comparison
 
 start_time_initialized:
 //compare timer low_h with max time
@@ -160,49 +153,20 @@ start_time_initialized:
 	//overflow may happen when timer count h exeeds 65535 -> 0 we get a negative result
 	//then jump to "time is up" to set Start on new timer value. 
 	//we might loose the time difference it is not so important for just one interval
-	jump fixed_pulse, ov
+	jump timer_low_h_overflow, ov
 	//load interval from external variable
 	move r3, time_to_wake_CPU
 	ld r3, r3, 0
 	sub r0, r0, r3 //r0(Timer - start time) - r3 (time_to_wake_CPU) if negative will lead to an overflow
 	jump time_not_up, ov  //if timediff - time to wake < 0 time not up
-		//------------------------------
-	move r3, test_div 
-	st r0, r3, 0 //write sub result in test variable
-	//------------------------------
-	//jumpr time_is_up, 100, gt
-	/*move r3, test_div 
-	st r0, r3, 0 //write sub result in test variable*/
-	jump time_is_up
 
-time_not_up:
-	//------------------------------
-	move r3, test_div 
-	st r0, r3, 0 //write sub result in test variable
-	halt  //nothing more to do start with next cyclus
-
-fixed_pulse:
-	//set pulse to 999 so we find it later in the log and set start time to timer again
-	//we might loose the time difference it is not so important for just one interval
-	move r0, pulse_count
-	move r1, 999
-	st r1, r0, 0
-	jump initialize_start_time
-
-no_overflow:
-
-
-time_is_up:
-//time is over max time
-// increment test pulse count
+	//time is over max time increment test pulse count
 	move r0, pulse_count
 	ld r1, r0, 0
 	add r2, r1, 1
 	st r2,  r0, 0
 	
-//reset start time to current value
-
-
+	//reset start time to current value
 	//copy timer low_h to start time_low_h
     move r1, timer_count_low_h
     ld r0, r1, 0
@@ -215,6 +179,23 @@ time_is_up:
     move r2, start_time_high
     st r0, r2, 0
 	jump end_program
+
+time_not_up:
+
+	halt  //nothing more to do start with next cyclus
+
+timer_low_h_overflow:
+	//TODO: remove: set pulse to 999 so we find it later in the log and set start time to timer again
+	//we might loose the time difference it is not so important for just one interval
+	move r0, pulse_count
+	move r1, 999
+	st r1, r0, 0
+	jump initialize_start_time
+
+no_overflow:
+
+
+
 	
 
 end_program:
