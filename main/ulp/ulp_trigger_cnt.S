@@ -8,6 +8,7 @@
    waiting for input signal polarity to change again.
    When the edge counter reaches certain value (set by the main program),
    this program running triggers a wake up from deep sleep.
+   20250316 V1.0: Merge with version ee7951e to add GPIO Trigger
 */
 
 /* ULP assembly files are passed through C preprocessor first, so include directives
@@ -103,10 +104,36 @@ return_address:
 	.text
 	.global entry
 entry:
+	//Read GPIO input
+	/* Load io_number */
+	move r3, io_number
+	ld r3, r3, 0
+	 /* ESP32S3 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_PERI_CLK_GATE_CONF_REG */
+    WRITE_RTC_FIELD(SENS_SAR_PERI_CLK_GATE_CONF_REG, SENS_IOMUX_CLK_EN, 1);
+	/* Lower 16 IOs and higher need to be handled separately,
+	 * because r0-r3 registers are 16 bit wide.
+	 * Check which IO this is.
+	 */
+	move r0, r3
+	jumpr read_io_high, 16, ge
+
+	/* Read the value of lower 16 RTC IOs into R0 */
+	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
+	rsh r0, r0, r3
+	jump read_done
+
+	/* Read the value of RTC IOs 16-17, into R0 */
+read_io_high:
+	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S + 16, 2)
+	sub r3, r3, 16
+	rsh r0, r0, r3
+
+read_done:
+	//Handle timer
 
 	// set update bit to get a new timestamp
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
-// register is 48 bit organized in lowReg 32 bit and high reg 16 bit we need only lowReg upper 16 bits and high reg
+  // register is 48 bit organized in lowReg 32 bit and high reg 16 bit we need only lowReg upper 16 bits and high reg
 
   // read upper 16 bit timer RTC_CNTL_TIME_LOW0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
