@@ -1,0 +1,12 @@
+@startuml ulp_trigger
+
+(*) --> "Read GPIO input"
+if "Input in higher IOs" then
+-->[true] "Read IO high into R0"
+--> "handle timer"
+else
+-->[false] "Read IO low into R0"
+--> "handle timer"
+-->[end process] (*)
+
+@enduml
