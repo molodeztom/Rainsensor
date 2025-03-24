@@ -1,12 +1,31 @@
-@startuml ulp_trigger
-
-(*) --> "Read GPIO input"
-if "Input in higher IOs" then
--->[true] "Read IO high into R0"
---> "handle timer"
-else
--->[false] "Read IO low into R0"
---> "handle timer"
--->[end process] (*)
-
+@startuml ulp_trigger_cnt
+start
+if (Input in higher IOs) then (true)
+: read IO high into R0;
+else (false)
+: read IO low into R0;
+endif
+: read current time low;
+: read current time high;
+if (start time inizialized) then (false)
+: initialize start time;
+else (true)
+ endif
+ : calc elapsed time
+ (curTime - startTime);
+ if (overflows) then (true)
+: increment test counter;
+: initialize start time;
+else (false)
+: compare elapsed time
+ with time intervall
+ (elapsed Time - time interval);
+ if (time intervall reached) then (false)
+  : halt;
+  stop
+ else (true)
+ : increment pulse_count;
+ : initialize start time;
+ : wake up CPU;
+ stop
 @enduml
