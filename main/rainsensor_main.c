@@ -58,7 +58,7 @@ static const char *TAG = "rainsens";
 #define BLINK_GPIO CONFIG_BLINK_GPIO
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 //#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
-#define ulp_wakeup_period 5000 //after ulp is halted it sleeps until next wakeup period
+#define ulp_wakeup_period 2000 //after ulp is halted it sleeps until next wakeup period
 static const double wakeup_interval_seconds = 90; //time to wake cpu if at minimum one input pulse detected
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
@@ -75,6 +75,7 @@ void format_time(uint32_t ms, int* hours, int* minutes, int* seconds);
 void signal_from_ulp();
 void ulp_task(void *arg);
 void setup_ulp_interrupt();
+static void update_pulse_count(void);
 
 
 static led_strip_handle_t led_strip;
@@ -124,7 +125,7 @@ void app_main(void)
     else
     {
         printf("ULP wakeup, saving pulse count\n");
-        // update_pulse_count();
+        update_pulse_count();
         update_timer_count();
     }
 
@@ -157,15 +158,16 @@ static void init_ulp_program(void)
      *
      * Note that the ULP reads only the lower 16 bits of these variables.
      */
-    ulp_debounce_counter = 2;
+    ulp_debounce_counter = 3;
     ulp_debounce_max_count = 3;
-    ulp_next_edge = 1;
+    ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
-    ulp_edge_count_to_wake_up = 10;
+    ulp_edge_count_to_wake_up = 4;
+
     //ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
-    ulp_edge_count = 0;
+    //ulp_edge_count = 0;
 
 // Calculate the number of timer_count_low_h increments for the desired interval
 uint16_t increments = calculate_increments_for_interval(wakeup_interval_seconds);
@@ -205,6 +207,33 @@ printf("Wake-up interval: %.2f seconds -> Increments: %u\n", wakeup_interval_sec
     ESP_ERROR_CHECK(err);
 }
 
+static void update_pulse_count(void)
+{
+    const char* nvs_namespace = "plusecnt";
+    const char* count_key = "count";
+
+    ESP_ERROR_CHECK( nvs_flash_init() );
+    nvs_handle_t handle;
+    ESP_ERROR_CHECK( nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    uint32_t pulse_count = 0;
+    esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
+    assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
+    printf("Read pulse count from NVS: %5" PRIu32"\n", pulse_count);
+
+    /* ULP program counts signal edges, convert that to the number of pulses */
+    uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
+    /* In case of an odd number of edges, keep one until next time */
+    ulp_edge_count = ulp_edge_count % 2;
+    printf("Pulse count from ULP: %5" PRIu32"\n", pulse_count_from_ulp);
+
+    /* Save the new pulse count to NVS */
+    pulse_count += pulse_count_from_ulp;
+    ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
+    ESP_ERROR_CHECK(nvs_commit(handle));
+    nvs_close(handle);
+    printf("Wrote updated pulse count to NVS: %5" PRIu32"\n", pulse_count);
+}
+
 static void update_timer_count(void)
 {
     const char *nvs_namespace = "plusecnt";
@@ -240,6 +269,9 @@ static void update_timer_count(void)
 
     uint32_t ulp_EDGE_COUNT = (ulp_edge_count & UINT16_MAX);
     printf("Edge Count: %5" PRIu32 "\n", ulp_EDGE_COUNT);
+
+    uint32_t ulp_EDGE_COUNT_TO_WAKE_UP = (ulp_edge_count_to_wake_up & UINT16_MAX);
+    printf("Edge Count to wake up: %5" PRIu32 "\n", ulp_EDGE_COUNT_TO_WAKE_UP);
    
     nvs_close(handle);
 
@@ -252,9 +284,6 @@ static void update_timer_count(void)
     // Convert milliseconds to hours, minutes, and seconds
     int hours, minutes, seconds;
     format_time(ms, &hours, &minutes, &seconds);
-
-    // Output the elapsed time in milliseconds
-    printf("Elapsed Time: %lu milliseconds\n", ms);
 
     // Output the elapsed time in h:mm:ss format
     printf("Elapsed Time: %02d:%02d:%02d\n", hours, minutes, seconds);
