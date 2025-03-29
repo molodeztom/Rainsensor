@@ -129,6 +129,63 @@ read_io_high:
 	rsh r0, r0, r3
 
 read_done:
+	and r0, r0, 1
+	/* State of input changed? */
+	move r3, next_edge
+	ld r3, r3, 0
+	add r3, r0, r3
+	and r3, r3, 1
+	jump changed, eq
+	/* Not changed */
+	/* Reset debounce_counter to debounce_max_count */
+	move r3, debounce_max_count
+	move r2, debounce_counter
+	ld r3, r3, 0
+	st r3, r2, 0
+	jump handle_timer
+
+changed:
+	/* Input state changed */
+	/* Has debounce_counter reached zero? */
+	move r3, debounce_counter
+	ld r2, r3, 0
+	add r2, r2, 0 /* dummy ADD to use "jump if ALU result is zero" */
+	jump edge_detected, eq
+	/* Not yet. Decrement debounce_counter */
+	sub r2, r2, 1
+	st r2, r3, 0
+	
+	jump handle_timer
+
+	.global edge_detected
+edge_detected:
+	/* Reset debounce_counter to debounce_max_count */
+	move r3, debounce_max_count
+	move r2, debounce_counter
+	ld r3, r3, 0
+	st r3, r2, 0
+	/* Flip next_edge */
+	move r3, next_edge
+	ld r2, r3, 0
+	add r2, r2, 1
+	and r2, r2, 1
+	st r2, r3, 0
+	/* Increment edge_count */
+	move r3, edge_count
+	ld r2, r3, 0
+	add r2, r2, 1
+	st r2, r3, 0
+	/* Compare edge_count to edge_count_to_wake_up */
+	move r3, edge_count_to_wake_up
+	ld r3, r3, 0
+	sub r3, r3, r2
+	jump wake_up, eq
+	/* Not yet. End program */
+	jump handle_timer
+
+	
+handle_timer:	
+	//halt
 	//Handle timer
 
 	// set update bit to get a new timestamp

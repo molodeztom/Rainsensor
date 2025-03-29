@@ -30,6 +30,7 @@ RainSensor
   20250310  V0.6.3.9        interval to ulp via variable, subtraction in ulp using overflow to find when time is up
   20250310  V0.6.3.10       Clean code part one remove unneeded instructions reduce jump instructions
   20250310  V0.6.4          Clean code use assembler subroutine, improved comments
+  20250327  V0.6.5          Debug out edge_count
 
   */
 
@@ -158,12 +159,13 @@ static void init_ulp_program(void)
      */
     ulp_debounce_counter = 2;
     ulp_debounce_max_count = 3;
-    ulp_next_edge = 0;
+    ulp_next_edge = 1;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 10;
     //ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
+    ulp_edge_count = 0;
 
 // Calculate the number of timer_count_low_h increments for the desired interval
 uint16_t increments = calculate_increments_for_interval(wakeup_interval_seconds);
@@ -236,6 +238,9 @@ static void update_timer_count(void)
     uint32_t ulp_TEST_DIV = (ulp_test_div & UINT16_MAX);
     printf("Test Value: %5" PRIu32 "\n", ulp_TEST_DIV);
 
+    uint32_t ulp_EDGE_COUNT = (ulp_edge_count & UINT16_MAX);
+    printf("Edge Count: %5" PRIu32 "\n", ulp_EDGE_COUNT);
+   
     nvs_close(handle);
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
