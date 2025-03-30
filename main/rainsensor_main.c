@@ -32,6 +32,7 @@ RainSensor
   20250310  V0.6.4          Clean code use assembler subroutine, improved comments
   20250327  V0.6.5          Debug out edge_count
   20250330  V0.6.5.1        Now working fine, still need to wake on timer only when a pulse was detected
+  20250330  V0.6.5.2        Only wake on timer when at least one pulse detected
 
   */
 
@@ -104,7 +105,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.5.1 \n\n");
+    printf("rainsensor V0.6.5.2 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
