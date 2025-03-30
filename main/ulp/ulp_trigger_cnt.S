@@ -8,6 +8,8 @@
    waiting for input signal polarity to change again.
    When the edge counter reaches certain value (set by the main program),
    this program running triggers a wake up from deep sleep.
+   20250316 V1.0: Merge with version ee7951e to add GPIO Trigger
+   20250330 V1.1: works with rainsensor_main.c Version 6.5.1
 */
 
 /* ULP assembly files are passed through C preprocessor first, so include directives
@@ -21,14 +23,12 @@
 
 	/* Define variables, which go into .bss section (zero-initialized data) */
 	.bss
-	/* Next input signal edge expected: 0 (negative) or 1 (positive) */
-	.global next_edge
+	/* Next input signal edge expected: 0 (negative) or 1 (positive) here we dont care and leave it to 0*/
 next_edge:
 	.long 0
-
 	/* Counter started when signal value changes.
 	   Edge is "debounced" when the counter reaches zero. */
-	.global debounce_counter
+	
 debounce_counter:
 	.long 0
 
@@ -58,9 +58,9 @@ time_to_wake_CPU:
 	.global io_number
 io_number:
 	.long 0
-
-	.global pulse_count
-pulse_count:
+//counter when timer is up
+	.global timer_count
+timer_count:
 	.long 0
 
 	.global timer_count_low_h
@@ -103,10 +103,97 @@ return_address:
 	.text
 	.global entry
 entry:
+	//Read GPIO input
+	/* Load io_number */
+	move r3, io_number
+	ld r3, r3, 0
+	 /* ESP32S3 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_PERI_CLK_GATE_CONF_REG */
+    WRITE_RTC_FIELD(SENS_SAR_PERI_CLK_GATE_CONF_REG, SENS_IOMUX_CLK_EN, 1);
+	/* Lower 16 IOs and higher need to be handled separately,
+	 * because r0-r3 registers are 16 bit wide.
+	 * Check which IO this is.
+	 */
+	move r0, r3
+	jumpr read_io_high, 16, ge
 
+	/* Read the value of lower 16 RTC IOs into R0 */
+	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
+	rsh r0, r0, r3
+	jump read_input_done
+
+	/* Read the value of RTC IOs 16-17, into R0 */
+read_io_high:
+	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S + 16, 2)
+	sub r3, r3, 16
+	rsh r0, r0, r3
+
+read_input_done:
+	and r0, r0, 1
+	/* State of input changed? */
+	move r3, next_edge
+	ld r3, r3, 0
+	add r3, r0, r3
+	and r3, r3, 1
+	jump changed, eq
+	/* Not changed */
+	/* Reset debounce_counter to debounce_max_count */
+	move r3, debounce_max_count
+	move r2, debounce_counter
+	ld r3, r3, 0
+	st r3, r2, 0
+	jump handle_timer
+
+changed:
+	/* Input state changed */
+	/* Has debounce_counter reached zero? */
+	move r3, debounce_counter
+	ld r2, r3, 0
+	add r2, r2, 0 /* dummy ADD to use "jump if ALU result is zero" */
+	jump edge_detected, eq
+	/* Not yet. Decrement debounce_counter */
+	sub r2, r2, 1
+	st r2, r3, 0
+	
+	jump handle_timer
+
+	.global edge_detected
+edge_detected:
+	/* Reset debounce_counter to debounce_max_count */
+	move r3, debounce_max_count
+	move r2, debounce_counter
+	ld r3, r3, 0
+	st r3, r2, 0
+	/* Flip next_edge */
+	move r3, next_edge
+	ld r2, r3, 0
+	add r2, r2, 1
+	and r2, r2, 1
+	st r2, r3, 0
+	/* Increment edge_count */
+	move r3, edge_count
+	ld r2, r3, 0
+	add r2, r2, 1
+	st r2, r3, 0
+	/* Compare edge_count to edge_count_to_wake_up */
+	move r3, edge_count_to_wake_up
+	ld r3, r3, 0
+	sub r3, r3, r2
+	jump wake_up, eq
+	/* change value in test_div to check if we are in the right place */
+	move r0, test_div
+	ld r1, r0, 0
+	add r2, r1, 1
+	st r2, r0, 0
+
+	/* Not yet. End program */
+	jump handle_timer
+
+	
+handle_timer:	
+	//Handle timer
 	// set update bit to get a new timestamp
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
-// register is 48 bit organized in lowReg 32 bit and high reg 16 bit we need only lowReg upper 16 bits and high reg
+  // register is 48 bit organized in lowReg 32 bit and high reg 16 bit we need only lowReg upper 16 bits and high reg
 
   // read upper 16 bit timer RTC_CNTL_TIME_LOW0_REG
 	REG_RD DR_REG_RTCCNTL_BASE + 0x10, 31, 16
@@ -152,36 +239,42 @@ start_time_initialized:
 	move r3, time_to_wake_CPU
 	ld r3, r3, 0
 	sub r0, r0, r3 //r0(Timer - start time) - r3 (time_to_wake_CPU) if negative will lead to an overflow
-	jump time_not_up, ov  //if timediff - time to wake < 0 time not up
+	jump halt_execution, ov  //if timediff - time to wake < 0 time not up - halt
 
 //--------------------------------------------------------------------------------
-    // Time is up: increment pulse_count and reset start time
-	move r0, pulse_count
+    // Time is up: increment timer_count and reset start time
+	move r0, timer_count
 	ld r1, r0, 0
 	add r2, r1, 1
 	st r2,  r0, 0
-	//store return adress, in this case we end program
-	move r1, end_start_time_initialized
+	//are there edges  to wake up?
+	move r3, edge_count
+	ld r0, r3, 0
+	add r0, r0, 0 /* dummy ADD to use "jump if ALU result is zero" */
+	jump no_edges_to_wake_up, eq
+	//at least one edge detected
+	//store return adress, to wake up CPU after initialisation
+	move r1, end_and_wake_CPU
 	move r2, return_address
 	st r1, r2, 0
 	jump initialize_start_time
+		
+no_edges_to_wake_up:	
+	//just end program without waking up CPU
+	move r1, halt_execution
+	move r2, return_address
+	st r1, r2, 0
+	jump initialize_start_time
+//-------------------------------------------- halt	
+	
 
-end_start_time_initialized:	
-	jump end_program
-
-time_not_up:
+halt_execution:
 
 	halt  //nothing more to do start with next cyclus
 
 // Handle timer low_h overflow
 timer_low_h_overflow:
-	//TODO: remove: 
-	// Set test value to number of overflows occured
 	//we might loose the time difference it is not so important for just one interval
-	move r0, test_div
-	ld r1, r0, 0
-	add r2, r1, 1
-	st r2, r0, 0
 
 	// Reinitialize start time
 	//store return adress, in this case we continue
@@ -190,7 +283,7 @@ timer_low_h_overflow:
 	st r1, r2, 0
 	jump initialize_start_time
 
-end_program:
+end_and_wake_CPU:
 	/* End program */
 	jump wake_up
 

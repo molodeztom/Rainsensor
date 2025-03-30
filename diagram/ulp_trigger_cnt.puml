@@ -1,0 +1,44 @@
+@startuml
+
+start
+
+
+    :Read GPIO Input;
+    if (IO < 16?) then (yes)
+        :Read lower 16 RTC IOs;
+    else (no)
+        :Read higher RTC IOs;
+    endif
+
+    :Handle Timer;
+    :Update timestamp;
+    :Read RTC Timer Registers;
+
+    if (First Run?) then (yes)
+        :Initialize Start Time;
+   endif
+        :Compare Timer with Start Time;
+        if (Timer Overflow?) then (yes)
+            :Store Return Address;
+            :Jump to Handle Overflow;
+            --> Handle Overflow;
+            :Reinitialize Start Time;
+            --> Return to Main;
+        endif
+    
+        if (Time Up?) then (yes)
+            :Increment Pulse Count;
+            :Store Return Address;
+            :Jump to Reset Start Time;
+            --> Reset Start Time;
+            --> Return to Main;
+        else (no)
+            :Do Nothing;
+        endif
+  
+    
+    :Jump to Return Address;
+    --> Return Address;
+
+
+stop
