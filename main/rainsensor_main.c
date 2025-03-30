@@ -240,10 +240,12 @@ static void update_timer_count(void)
     ;
     ESP_ERROR_CHECK(nvs_flash_init());
     nvs_handle_t handle;
-    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READONLY, &handle));
     uint32_t timer_count = 1;
     esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
 
+    
+    nvs_close(handle);
     uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
     printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
 
@@ -271,7 +273,6 @@ static void update_timer_count(void)
     uint32_t ulp_EDGE_COUNT_TO_WAKE_UP = (ulp_edge_count_to_wake_up & UINT16_MAX);
     printf("Edge Count to wake up: %5" PRIu32 "\n", ulp_EDGE_COUNT_TO_WAKE_UP);
 
-    nvs_close(handle);
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
                            ((uint32_t)ulp_TIMER_LOW_H << 16);
