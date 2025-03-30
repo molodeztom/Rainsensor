@@ -9,6 +9,7 @@
    When the edge counter reaches certain value (set by the main program),
    this program running triggers a wake up from deep sleep.
    20250316 V1.0: Merge with version ee7951e to add GPIO Trigger
+   20250330 V1.1: works with rainsensor_main.c Version 6.5.1
 */
 
 /* ULP assembly files are passed through C preprocessor first, so include directives
@@ -59,9 +60,9 @@ time_to_wake_CPU:
 	.global io_number
 io_number:
 	.long 0
-
-	.global pulse_count
-pulse_count:
+//counter when timer is up
+	.global timer_count
+timer_count:
 	.long 0
 
 	.global timer_count_low_h
@@ -244,8 +245,8 @@ start_time_initialized:
 	jump time_not_up, ov  //if timediff - time to wake < 0 time not up
 
 //--------------------------------------------------------------------------------
-    // Time is up: increment pulse_count and reset start time
-	move r0, pulse_count
+    // Time is up: increment timer_count and reset start time
+	move r0, timer_count
 	ld r1, r0, 0
 	add r2, r1, 1
 	st r2,  r0, 0

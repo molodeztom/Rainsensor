@@ -31,6 +31,7 @@ RainSensor
   20250310  V0.6.3.10       Clean code part one remove unneeded instructions reduce jump instructions
   20250310  V0.6.4          Clean code use assembler subroutine, improved comments
   20250327  V0.6.5          Debug out edge_count
+  20250330  V0.6.5.1        Now working fine, still need to wake on timer only when a pulse was detected
 
   */
 
@@ -57,9 +58,9 @@ RainSensor
 static const char *TAG = "rainsens";
 #define BLINK_GPIO CONFIG_BLINK_GPIO
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
-//#define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
-#define ulp_wakeup_period 2000 //after ulp is halted it sleeps until next wakeup period
-static const double wakeup_interval_seconds = 90; //time to wake cpu if at minimum one input pulse detected
+// #define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
+#define ulp_wakeup_period 2000                    // after ulp is halted it sleeps until next wakeup period
+static const double wakeup_interval_seconds = 30; // time to wake cpu if at minimum one input pulse detected
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -71,18 +72,17 @@ static void configure_led(void);
 uint32_t calculate_time_ms(uint64_t ticks);
 uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
-void format_time(uint32_t ms, int* hours, int* minutes, int* seconds);
+void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
 void signal_from_ulp();
 void ulp_task(void *arg);
 void setup_ulp_interrupt();
 static void update_pulse_count(void);
-
+static void  reset_counter(void);
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
-
 
 static void IRAM_ATTR ulp_isr_handler(void *arg)
 {
@@ -95,8 +95,6 @@ static void IRAM_ATTR ulp_isr_handler(void *arg)
     }
 }
 
-
-
 void app_main(void)
 {
     /* If user is using USB-serial-jtag then idf monitor needs some time to
@@ -106,7 +104,7 @@ void app_main(void)
      */
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.4 \n\n");
+    printf("rainsensor V0.6.5.1 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     /* Configure the peripheral according to the LED type */
@@ -125,16 +123,16 @@ void app_main(void)
     else
     {
         printf("ULP wakeup, saving pulse count\n");
-        update_pulse_count();
         update_timer_count();
+        update_pulse_count();
     }
-
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
     // wait some time to get a chance to call interrupt from usp instead of wakeup
     // vTaskDelay(pdMS_TO_TICKS(10000));
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
+    //reset_counter();//TODO remove
     esp_deep_sleep_start();
 }
 
@@ -162,21 +160,21 @@ static void init_ulp_program(void)
     ulp_debounce_max_count = 3;
     ulp_next_edge = 0;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
-    ulp_edge_count_to_wake_up = 4;
+    ulp_edge_count_to_wake_up = 8;
 
-    //ulp_timer_count_low_l = 0;
+    // ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
-    //ulp_edge_count = 0;
+    // ulp_edge_count = 0;
 
-// Calculate the number of timer_count_low_h increments for the desired interval
-uint16_t increments = calculate_increments_for_interval(wakeup_interval_seconds);
+    // Calculate the number of timer_count_low_h increments for the desired interval
+    uint16_t increments = calculate_increments_for_interval(wakeup_interval_seconds);
 
-// Pass the increments value to the ULP program
-ulp_time_to_wake_CPU = increments;
-printf("Wake-up interval: %.2f seconds -> Increments: %u\n", wakeup_interval_seconds, increments);
+    // Pass the increments value to the ULP program
+    ulp_time_to_wake_CPU = increments;
+    printf("Wake-up interval: %.2f seconds -> Increments: %u\n", wakeup_interval_seconds, increments);
 
- printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
+    printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
@@ -209,29 +207,29 @@ printf("Wake-up interval: %.2f seconds -> Increments: %u\n", wakeup_interval_sec
 
 static void update_pulse_count(void)
 {
-    const char* nvs_namespace = "plusecnt";
-    const char* count_key = "count";
+    const char *nvs_namespace = "plusecnt";
+    const char *count_key = "count";
 
-    ESP_ERROR_CHECK( nvs_flash_init() );
+    ESP_ERROR_CHECK(nvs_flash_init());
     nvs_handle_t handle;
-    ESP_ERROR_CHECK( nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     uint32_t pulse_count = 0;
     esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    printf("Read pulse count from NVS: %5" PRIu32"\n", pulse_count);
+    printf("Read pulse count from NVS: %5" PRIu32 "\n", pulse_count);
 
     /* ULP program counts signal edges, convert that to the number of pulses */
     uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
-    /* In case of an odd number of edges, keep one until next time */
+    /* In case of an odd number of edges, keep one until next time, result is 0 or 1! */
     ulp_edge_count = ulp_edge_count % 2;
-    printf("Pulse count from ULP: %5" PRIu32"\n", pulse_count_from_ulp);
+    printf("pulse count from ULP: %5" PRIu32 "\n", pulse_count_from_ulp);
 
     /* Save the new pulse count to NVS */
     pulse_count += pulse_count_from_ulp;
     ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
-    printf("Wrote updated pulse count to NVS: %5" PRIu32"\n", pulse_count);
+    printf("Wrote updated pulse count to NVS: %5" PRIu32 "\n", pulse_count);
 }
 
 static void update_timer_count(void)
@@ -244,7 +242,6 @@ static void update_timer_count(void)
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     uint32_t timer_count = 1;
     esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
- 
 
     uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
     printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
@@ -261,8 +258,8 @@ static void update_timer_count(void)
     uint32_t ulp_START_TIME_HIGH = (ulp_start_time_high & UINT16_MAX);
     printf("start_time_high: %5" PRIu32 "\n", ulp_START_TIME_HIGH);
 
-    uint32_t ulp_PULSE_COUNT = (ulp_pulse_count & UINT16_MAX);
-    printf("pulse_count: %5" PRIu32 "\n", ulp_PULSE_COUNT);
+    uint32_t ulp_TIMER_COUNT = (ulp_timer_count & UINT16_MAX);
+    printf("timer_count: %5" PRIu32 "\n", ulp_TIMER_COUNT);
 
     uint32_t ulp_TEST_DIV = (ulp_test_div & UINT16_MAX);
     printf("Test Value: %5" PRIu32 "\n", ulp_TEST_DIV);
@@ -272,11 +269,11 @@ static void update_timer_count(void)
 
     uint32_t ulp_EDGE_COUNT_TO_WAKE_UP = (ulp_edge_count_to_wake_up & UINT16_MAX);
     printf("Edge Count to wake up: %5" PRIu32 "\n", ulp_EDGE_COUNT_TO_WAKE_UP);
-   
+
     nvs_close(handle);
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
-    ((uint32_t)ulp_TIMER_LOW_H << 16);
+                           ((uint32_t)ulp_TIMER_LOW_H << 16);
     printf("ULP Timerwert: %llu Ticks\n", timer_value);
 
     uint32_t ms = calculate_time_ms(timer_value);
@@ -287,43 +284,46 @@ static void update_timer_count(void)
 
     // Output the elapsed time in h:mm:ss format
     printf("Elapsed Time: %02d:%02d:%02d\n", hours, minutes, seconds);
-
-    
 }
 
 // Function to calculate the elapsed time in milliseconds
-uint32_t calculate_time_ms(uint64_t ticks) {
+uint32_t calculate_time_ms(uint64_t ticks)
+{
     // Each tick corresponds to approximately 6.67 microseconds, so we use the formula to convert ticks to milliseconds.
     // Calculation in milliseconds: (Ticks / RTC_SLOW_CLK_FREQ) * 1000
     return (uint32_t)((ticks * 1000) / RTC_SLOW_CLK_FREQ); // Ticks -> milliseconds
 }
 
-uint64_t calculate_ticks_from_seconds(double seconds) {
+uint64_t calculate_ticks_from_seconds(double seconds)
+{
     // Convert seconds to ticks using the formula: Ticks = seconds * RTC_SLOW_CLK_FREQ
     return (uint64_t)(seconds * RTC_SLOW_CLK_FREQ);
 }
 
 // Function to convert milliseconds into hours, minutes, and seconds
-void format_time(uint32_t ms, int* hours, int* minutes, int* seconds) {
-    *hours = ms / 3600000;           // Calculate hours (ms / 3600000)
-    *minutes = (ms % 3600000) / 60000;  // Calculate minutes ((ms % 3600000) / 60000)
-    *seconds = (ms % 60000) / 1000;   // Calculate seconds ((ms % 60000) / 1000)
+void format_time(uint32_t ms, int *hours, int *minutes, int *seconds)
+{
+    *hours = ms / 3600000;             // Calculate hours (ms / 3600000)
+    *minutes = (ms % 3600000) / 60000; // Calculate minutes ((ms % 3600000) / 60000)
+    *seconds = (ms % 60000) / 1000;    // Calculate seconds ((ms % 60000) / 1000)
 }
 
 // Function to calculate the number of timer_count_low_h increments for a given interval
-uint16_t calculate_increments_for_interval(double interval_seconds) {
- // Each timer_count_low_h increment corresponds to 65536 / 136000 ≈ 0.482 seconds
- double increments = interval_seconds / (65536.0 / RTC_SLOW_CLK_FREQ);
+uint16_t calculate_increments_for_interval(double interval_seconds)
+{
+    // Each timer_count_low_h increment corresponds to 65536 / 136000 ≈ 0.482 seconds
+    double increments = interval_seconds / (65536.0 / RTC_SLOW_CLK_FREQ);
 
- // Manual rounding
- if (increments - (uint16_t)increments >= 0.5) {
-     return (uint16_t)increments + 1;
- } else {
-     return (uint16_t)increments;
- }
+    // Manual rounding
+    if (increments - (uint16_t)increments >= 0.5)
+    {
+        return (uint16_t)increments + 1;
+    }
+    else
+    {
+        return (uint16_t)increments;
+    }
 }
-
-
 
 void signal_from_ulp()
 {
@@ -387,4 +387,18 @@ static void configure_led(void)
         .flags.with_dma = true,
     };
     ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &led_strip));
+}
+
+static void reset_counter(void)
+{
+    const char *nvs_namespace = "plusecnt";
+    const char *count_key = "count";
+    ESP_ERROR_CHECK(nvs_flash_init());
+    nvs_handle_t handle;
+    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    uint32_t pulse_count = 0;
+    uint32_t timer_count = 0;
+    ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
+    ESP_ERROR_CHECK(nvs_commit(handle));
+    nvs_close(handle);
 }
