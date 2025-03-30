@@ -23,14 +23,12 @@
 
 	/* Define variables, which go into .bss section (zero-initialized data) */
 	.bss
-	/* Next input signal edge expected: 0 (negative) or 1 (positive) */
-	.global next_edge
+	/* Next input signal edge expected: 0 (negative) or 1 (positive) here we dont care and leave it to 0*/
 next_edge:
 	.long 0
-
 	/* Counter started when signal value changes.
 	   Edge is "debounced" when the counter reaches zero. */
-	.global debounce_counter
+	
 debounce_counter:
 	.long 0
 
@@ -121,7 +119,7 @@ entry:
 	/* Read the value of lower 16 RTC IOs into R0 */
 	READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
 	rsh r0, r0, r3
-	jump read_done
+	jump read_input_done
 
 	/* Read the value of RTC IOs 16-17, into R0 */
 read_io_high:
@@ -129,7 +127,7 @@ read_io_high:
 	sub r3, r3, 16
 	rsh r0, r0, r3
 
-read_done:
+read_input_done:
 	and r0, r0, 1
 	/* State of input changed? */
 	move r3, next_edge
@@ -181,6 +179,7 @@ edge_detected:
 	ld r3, r3, 0
 	sub r3, r3, r2
 	jump wake_up, eq
+	/* change value in test_div to check if we are in the right place */
 	move r0, test_div
 	ld r1, r0, 0
 	add r2, r1, 1
@@ -191,9 +190,7 @@ edge_detected:
 
 	
 handle_timer:	
-	//halt
 	//Handle timer
-
 	// set update bit to get a new timestamp
     WRITE_RTC_REG(RTC_CNTL_TIME_UPDATE_REG, 31, 1, 1)
   // register is 48 bit organized in lowReg 32 bit and high reg 16 bit we need only lowReg upper 16 bits and high reg
