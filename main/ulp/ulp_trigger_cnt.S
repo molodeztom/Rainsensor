@@ -28,7 +28,8 @@ next_edge:
 	.long 0
 	/* Counter started when signal value changes.
 	   Edge is "debounced" when the counter reaches zero. */
-	
+
+	.global debounce_counter
 debounce_counter:
 	.long 0
 

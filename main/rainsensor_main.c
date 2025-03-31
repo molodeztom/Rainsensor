@@ -158,7 +158,7 @@ static void init_ulp_program(void)
      *
      * Note that the ULP reads only the lower 16 bits of these variables.
      */
-   // ulp_debounce_counter = 3;
+    ulp_debounce_counter = 3;
     ulp_debounce_max_count = 3;
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 8;
