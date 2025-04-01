@@ -34,6 +34,7 @@ RainSensor
   20250330  V0.6.5.1        Now working fine, still need to wake on timer only when a pulse was detected
   20250330  V0.6.5.2        Only wake on timer when at least one pulse detected
   20250330  V0.6.5.3        Clean code
+  20250401  V0.7.0          Merged with main
 
   */
 
