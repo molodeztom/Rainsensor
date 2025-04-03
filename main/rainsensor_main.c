@@ -35,7 +35,7 @@ RainSensor
   20250330  V0.6.5.2        Only wake on timer when at least one pulse detected
   20250330  V0.6.5.3        Clean code
   20250401  V0.7.0          Merged with main
-
+  20250401  V0.7.1          Add interrupt handler for ulp wakeup
   */
 
 #include <stdio.h>
@@ -87,6 +87,8 @@ static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
 
+
+
 static void IRAM_ATTR ulp_isr_handler(void *arg)
 {
     SET_PERI_REG_MASK(RTC_CNTL_INT_CLR_REG, RTC_CNTL_ULP_CP_INT_CLR_M);
@@ -112,11 +114,12 @@ void app_main(void)
 
     /* Configure the peripheral according to the LED type */
     configure_led();
+    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
 
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-    // setup_ulp_interrupt();
+    setup_ulp_interrupt();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
@@ -132,7 +135,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
     // wait some time to get a chance to call interrupt from usp instead of wakeup
-    // vTaskDelay(pdMS_TO_TICKS(10000));
+    vTaskDelay(pdMS_TO_TICKS(10000));
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
     //reset_counter();//TODO remove
@@ -333,7 +336,7 @@ void signal_from_ulp()
     ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
     interrupt_count++;
     printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-    update_timer_count();
+    update_pulse_count();
 }
 
 void ulp_task(void *arg)
