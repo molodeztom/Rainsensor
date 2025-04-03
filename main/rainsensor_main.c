@@ -135,7 +135,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
     // wait some time to get a chance to call interrupt from usp instead of wakeup
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    vTaskDelay(pdMS_TO_TICKS(20000));
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
     //reset_counter();//TODO remove
@@ -360,7 +360,7 @@ void ulp_task(void *arg)
         // Überprüfe den Stack-Verbrauch
         highWaterMark = uxTaskGetStackHighWaterMark(NULL);
         printf("Stack High Water Mark: %d\n", highWaterMark);
-    }
+         }
 }
 
 void setup_ulp_interrupt()
