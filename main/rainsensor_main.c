@@ -36,6 +36,7 @@ RainSensor
   20250330  V0.6.5.3        Clean code
   20250401  V0.7.0          Merged with main
   20250401  V0.7.1          Add interrupt handler for ulp wakeup
+  20250404  V0.8.0          Add blink task to check if a longer task in main is working and blocks deep sleep
   */
 
 #include <stdio.h>
@@ -63,10 +64,13 @@ static const char *TAG = "rainsens";
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 // #define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
 #define ulp_wakeup_period 1000                    // after ulp is halted it sleeps until next wakeup period
-static const double wakeup_interval_seconds = 30; // time to wake cpu if at minimum one input pulse detected
+static const double wakeup_interval_seconds = 20; // time to wake cpu if at minimum one input pulse detected
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
+
+EventGroupHandle_t blink_event_group;
+#define TASK_DONE_BIT (1 << 0) // Bitmask for the event group
 
 // forward declarations
 static void init_ulp_program(void);
@@ -78,6 +82,7 @@ uint16_t calculate_increments_for_interval(double interval_seconds);
 void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
 void signal_from_ulp();
 void ulp_task(void *arg);
+void BlinkTask(void *arg);
 void setup_ulp_interrupt();
 static void update_pulse_count(void);
 static void  reset_counter(void);
@@ -107,10 +112,20 @@ void app_main(void)
      *  before we print anything. Otherwise the chip will go back to sleep again before the user
      *  has time to monitor any output.
      */
+    TaskHandle_t xBlinkTask = NULL;
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_log_level_set("*", ESP_LOG_INFO);
     printf("rainsensor V0.6.5.3 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
+
+    blink_event_group = xEventGroupCreate(); // Create the event group for task synchronization
+    if (blink_event_group == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to create event group");
+        return;
+    }
+  
+    /* Initialize NVS */
 
     /* Configure the peripheral according to the LED type */
     configure_led();
@@ -134,8 +149,13 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
+   
+    xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);  
+    xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
+
     // wait some time to get a chance to call interrupt from usp instead of wakeup
-    vTaskDelay(pdMS_TO_TICKS(20000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
     //reset_counter();//TODO remove
@@ -363,6 +383,31 @@ void ulp_task(void *arg)
          }
 }
 
+void BlinkTask(void *arg)
+{
+    for (int i = 0; i < 15; i++)
+    {
+        led_strip_set_pixel(led_strip, 0, 230, 0, 0);
+        /* Refresh the strip to send data */
+        led_strip_refresh(led_strip);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        led_strip_set_pixel(led_strip, 0, 0, 230, 0);
+        /* Refresh the strip to send data */
+        led_strip_refresh(led_strip);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    led_strip_set_pixel(led_strip, 0, 200, 200, 200);
+    /* Refresh the strip to send data */
+    led_strip_refresh(led_strip);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    xEventGroupSetBits(blink_event_group, TASK_DONE_BIT); // Set the event group bit to signal task completion
+    led_strip_clear(led_strip); // Clear the LED strip
+
+    ESP_LOGI(TAG, "BlinkTask finished, deleting task");
+    vTaskDelete(NULL); // Delete the task when done     
+}
+
+
 void setup_ulp_interrupt()
 {
     esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M, ESP_INTR_FLAG_IRAM);
@@ -408,3 +453,4 @@ static void reset_counter(void)
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
 }
+
