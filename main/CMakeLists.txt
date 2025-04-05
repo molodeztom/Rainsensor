@@ -1,4 +1,4 @@
-idf_component_register(SRCS "rainsensor_main.c"
+idf_component_register(SRCS "e32_900T30.c" "rainsensor_main.c"
                     INCLUDE_DIRS ""
                     REQUIRES driver soc nvs_flash ulp)
 #

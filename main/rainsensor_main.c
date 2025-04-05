@@ -37,10 +37,12 @@ RainSensor
   20250401  V0.7.0          Merged with main
   20250401  V0.7.1          Add interrupt handler for ulp wakeup
   20250404  V0.8.0          Add blink task to check if a longer task in main is working and blocks deep sleep
+  20250405  V0.8.1          Add E32-900T30D LoRa module to send data
   */
 
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_sleep.h"
@@ -56,7 +58,7 @@ RainSensor
 #include "led_strip.h"
 // #include "esp_intr_alloc.h"
 #include "driver/rtc_cntl.h"
-
+#include "e32_900t30d.h"
 #include "esp_log.h"
 // definitions
 static const char *TAG = "rainsens";
@@ -87,6 +89,7 @@ void setup_ulp_interrupt();
 static void update_pulse_count(void);
 static void  reset_counter(void);
 
+
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
 
@@ -105,6 +108,13 @@ static void IRAM_ATTR ulp_isr_handler(void *arg)
     }
 }
 
+// Callback-Funktion für empfangene Daten
+static void handle_received_data(const uint8_t *data, size_t len) {
+    ESP_LOGI(TAG, "Empfangene Daten (%d Bytes): %.*s", len, len, data);
+    // Hier können Sie die empfangenen Daten weiterverarbeiten
+}
+
+
 void app_main(void)
 {
     /* If user is using USB-serial-jtag then idf monitor needs some time to
@@ -114,16 +124,31 @@ void app_main(void)
      */
     TaskHandle_t xBlinkTask = NULL;
     vTaskDelay(pdMS_TO_TICKS(1000));
-    esp_log_level_set("*", ESP_LOG_INFO);
-    printf("rainsensor V0.6.5.3 \n\n");
+    esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
+    esp_log_level_set("E32-900T30D", ESP_LOG_INFO);
+    esp_log_level_set("rainsens", ESP_LOG_INFO);
+    printf("rainsensor V0.8.1 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
+    ESP_LOGI("rainsens", "rainsensor V0.8.1 started");
+    ESP_LOGI("E32-900T30D", "E32-900T30D example started");
     blink_event_group = xEventGroupCreate(); // Create the event group for task synchronization
     if (blink_event_group == NULL)
     {
         ESP_LOGE(TAG, "Failed to create event group");
         return;
     }
+
+     // E32-Modul initialisieren
+     e32_init();
+    
+     // Callback für empfangene Daten registrieren
+     e32_set_receive_callback(handle_received_data);
+     
+     // Beispiel: Nachricht senden
+     char *test_msg = "Hello LoRa World!";
+
+     e32_send_data((uint8_t *)test_msg, strlen(test_msg));
   
     /* Initialize NVS */
 
