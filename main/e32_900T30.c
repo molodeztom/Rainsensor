@@ -1,7 +1,6 @@
 #include "e32_900t30d.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
-#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -17,6 +16,9 @@
 // UART Konfiguration
 #define E32_UART_PORT  UART_NUM_1
 #define BUF_SIZE       1024
+
+#define CONFIG_CMD_LEN 6
+#define RESPONSE_LEN   6
 
 void e32_set_mode(uint8_t m0, uint8_t m1) {
     gpio_set_level(E32_M0_GPIO, m0);
@@ -68,15 +70,18 @@ void e32_init() {
     ESP_ERROR_CHECK(uart_driver_install(E32_UART_PORT, BUF_SIZE * 2, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(E32_UART_PORT, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(E32_UART_PORT, E32_TXD_GPIO, E32_RXD_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+   
 
-    // Normal Mode (M0=0, M1=0)
-    e32_set_mode(0, 0);
+   
     
     ESP_LOGI(TAG, "E32-900T30D initialisiert");
 }
-void e32_send_data(const uint8_t *data, size_t len) {
-    uart_write_bytes(E32_UART_PORT, (const char *)data, len);
-    ESP_LOGI(TAG, "%d Bytes gesendet", len);
+
+
+// Daten senden
+esp_err_t e32_send_data(const uint8_t *data, size_t len) {
+    int bytes_written = uart_write_bytes(E32_UART_PORT, (const char *)data, len);
+    return (bytes_written == len) ? ESP_OK : ESP_FAIL;
 }
 
 void e32_set_receive_callback(e32_receive_callback_t callback) {
@@ -84,11 +89,129 @@ void e32_set_receive_callback(e32_receive_callback_t callback) {
 }
 
 void e32_configure(void) {
-    e32_set_mode(1, 1); // Sleep Mode
+ // 1. In den Konfigurationsmodus wechseln (Sleep Mode)
+ e32_set_mode(1, 1);
+    
+ // 2. Warten bis Moduswechsel abgeschlossen ist
+ // (Das Modul benötigt typisch 30-100ms)
+ vTaskDelay(pdMS_TO_TICKS(100));
+ 
+ // 3. Konfigurationsbefehl senden
+ // Byte 0: C0 = Write Configuration
+ // Byte 1-5: Konfigurationsparameter
+ uint8_t config_cmd[6] = {
+     0xC0,    // Write Configuration Command
+     0x00,    // Address High Byte
+     0x08,    // Baudrate/Parity/Air Rate
+     0x00,    // Channel
+     0x00,    // Option Flags
+     0x44     // CRC Checksum
+ };
+ 
+
+     // Configuration Command senden (0xC1)
+     if (e32_send_data(config_cmd, sizeof(config_cmd)) != ESP_OK) {
+        ESP_LOGE(TAG, "Fehler beim Senden des Konfigurationsbefehls");
+        return;
+    }
+ 
+ // 4. Kurz warten bis Befehl verarbeitet wurde
+ vTaskDelay(pdMS_TO_TICKS(50));
+ 
+ // 5. Zurück in den Normalmodus
+ e32_set_mode(0, 0);
+ ESP_LOGI(TAG, "E32-900T30D konfiguriert");
+
+}
+
+
+
+// Daten empfangen mit Timeout
+esp_err_t e32_receive_data(uint8_t *buffer, size_t len, uint32_t timeout_ms) {
+    int bytes_read = uart_read_bytes(E32_UART_PORT, buffer, len, pdMS_TO_TICKS(timeout_ms));
+    return (bytes_read == len) ? ESP_OK : ESP_FAIL;
+}
+
+// Parameter auslesen und anzeigen
+void e32_read_and_display_parameters() {
+    uint8_t read_cmd[CONFIG_CMD_LEN] = {0xC1, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8_t response[RESPONSE_LEN] = {0};
+    
+    // In den Konfigurationsmodus wechseln
+    e32_set_mode(1, 1);
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    uint8_t config_cmd[6] = {0xC0, 0x00, 0x08, 0x00, 0x00, 0x44};
-    e32_send_data(config_cmd, sizeof(config_cmd));
+    // Read Configuration Command senden (0xC1)
+    if (e32_send_data(read_cmd, CONFIG_CMD_LEN) != ESP_OK) {
+        ESP_LOGE(TAG, "Fehler beim Senden des Lesebefehls");
+        return;
+    }
     
-    e32_set_mode(0, 0); // Zurück zu Normal Mode
+    // Antwort empfangen
+    if (e32_receive_data(response, RESPONSE_LEN, 200) != ESP_OK) {
+        ESP_LOGE(TAG, "Fehler beim Empfang der Konfiguration");
+        return;
+    }
+    
+    // Zurück zum Normalmodus
+    e32_set_mode(0, 0);
+    
+    // Parameter dekodieren und anzeigen
+    ESP_LOGI(TAG, "Aktuelle E32-900T30D Konfiguration:");
+    ESP_LOGI(TAG, "----------------------------------");
+    
+    // 1. Byte: HEAD (should be 0xC1 for response)
+    ESP_LOGI(TAG, "HEAD: 0x%02X", response[0]);
+    
+    // 2. Byte: ADDH (Address high byte)
+    ESP_LOGI(TAG, "ADDH (Address High): 0x%02X", response[1]);
+    
+    // 3. Byte: ADDL (Address low byte)
+    ESP_LOGI(TAG, "ADDL (Address Low): 0x%02X", response[2]);
+    
+    // 4. Byte: SPEED (SPED)
+    uint8_t speed = response[3];
+    ESP_LOGI(TAG, "SPED (Speed): 0x%02X", speed);
+    ESP_LOGI(TAG, "  - UART Baudrate: %s", 
+             (speed & 0x03) == 0x00 ? "1200" :
+             (speed & 0x03) == 0x01 ? "2400" :
+             (speed & 0x03) == 0x02 ? "4800" :
+             (speed & 0x03) == 0x03 ? "9600" : "19200");
+    ESP_LOGI(TAG, "  - UART Parity: %s", 
+             ((speed >> 2) & 0x03) == 0x00 ? "8N1" :
+             ((speed >> 2) & 0x03) == 0x01 ? "8O1" :
+             ((speed >> 2) & 0x03) == 0x02 ? "8E1" : "8N1");
+    ESP_LOGI(TAG, "  - Air Data Rate: %s kbps", 
+             ((speed >> 4) & 0x07) == 0x00 ? "0.3" :
+             ((speed >> 4) & 0x07) == 0x01 ? "1.2" :
+             ((speed >> 4) & 0x07) == 0x02 ? "2.4" : "4.8/9.6/19.2");
+    
+    // 5. Byte: CHAN (Channel)
+    uint8_t channel = response[4];
+    float frequency = 902.0 + (channel * 0.125);
+    ESP_LOGI(TAG, "CHAN: 0x%02X (%.3f MHz)", channel, frequency);
+    
+    // 6. Byte: OPTION
+    uint8_t option = response[5];
+    ESP_LOGI(TAG, "OPTION: 0x%02X", option);
+    ESP_LOGI(TAG, "  - Transmission Mode: %s", 
+             (option & 0x01) ? "Fixed" : "Transparent");
+    ESP_LOGI(TAG, "  - IO Drive Mode: %s", 
+             ((option >> 1) & 0x01) ? "Open collector" : "Push-pull");
+    ESP_LOGI(TAG, "  - Wireless Wakeup: %d ms", 
+             ((option >> 2) & 0x07) == 0 ? 250 :
+             ((option >> 2) & 0x07) == 1 ? 500 :
+             ((option >> 2) & 0x07) == 2 ? 750 :
+             ((option >> 2) & 0x07) == 3 ? 1000 :
+             ((option >> 2) & 0x07) == 4 ? 1250 :
+             ((option >> 2) & 0x07) == 5 ? 1500 :
+             ((option >> 2) & 0x07) == 6 ? 1750 : 2000);
+    ESP_LOGI(TAG, "  - FEC: %s", 
+             ((option >> 5) & 0x01) ? "Enabled" : "Disabled");
+    ESP_LOGI(TAG, "  - Transmission Power: %s", 
+             ((option >> 6) & 0x03) == 0x00 ? "30dBm" :
+             ((option >> 6) & 0x03) == 0x01 ? "27dBm" :
+             ((option >> 6) & 0x03) == 0x02 ? "24dBm" : "21dBm");
+    
+    ESP_LOGI(TAG, "----------------------------------");
 }

@@ -141,14 +141,25 @@ void app_main(void)
 
      // E32-Modul initialisieren
      e32_init();
+     e32_configure(); // Konfiguration des Moduls
+         // Parameter auslesen und anzeigen
+    e32_read_and_display_parameters();
     
      // Callback für empfangene Daten registrieren
      e32_set_receive_callback(handle_received_data);
      
      // Beispiel: Nachricht senden
+     printf("Sende Testnachricht\n");
+
      char *test_msg = "Hello LoRa World!";
 
-     e32_send_data((uint8_t *)test_msg, strlen(test_msg));
+         // Read Configuration Command senden (0xC1)
+    if (e32_send_data((uint8_t *)test_msg, strlen(test_msg)) != ESP_OK) {
+        ESP_LOGE(TAG, "Fehler beim Senden der Testnachricht");
+        return;
+    }
+
+     
   
     /* Initialize NVS */
 
