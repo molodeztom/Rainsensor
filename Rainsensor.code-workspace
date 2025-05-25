@@ -4,5 +4,10 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.associations": {
+			"ulp_main.h": "c",
+			"task.h": "c"
+		}
+	}
 }

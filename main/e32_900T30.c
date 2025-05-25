@@ -70,9 +70,7 @@ void e32_init() {
     ESP_ERROR_CHECK(uart_driver_install(E32_UART_PORT, BUF_SIZE * 2, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(E32_UART_PORT, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(E32_UART_PORT, E32_TXD_GPIO, E32_RXD_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-   
-
-   
+  
     
     ESP_LOGI(TAG, "E32-900T30D initialisiert");
 }
@@ -134,28 +132,51 @@ esp_err_t e32_receive_data(uint8_t *buffer, size_t len, uint32_t timeout_ms) {
 
 // Parameter auslesen und anzeigen
 void e32_read_and_display_parameters() {
+
     uint8_t read_cmd[CONFIG_CMD_LEN] = {0xC1, 0x00, 0x00, 0x00, 0x00, 0x00};
     uint8_t response[RESPONSE_LEN] = {0};
     
-    // In den Konfigurationsmodus wechseln
+    // 1. In den Konfigurationsmodus wechseln
     e32_set_mode(1, 1);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(150)); // Längere Verzögerung
     
-    // Read Configuration Command senden (0xC1)
-    if (e32_send_data(read_cmd, CONFIG_CMD_LEN) != ESP_OK) {
-        ESP_LOGE(TAG, "Fehler beim Senden des Lesebefehls");
+    // 2. AUX-Pin Status prüfen (wenn angeschlossen)
+    #ifdef E32_AUX_GPIO
+    int retries = 0;
+    while (gpio_get_level(E32_AUX_GPIO) == 0 && retries++ < 10) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (retries >= 10) {
+        ESP_LOGE(TAG, "AUX-Pin nicht bereit - Modul antwortet nicht");
         return;
     }
+    #endif
     
-    // Antwort empfangen
-    if (e32_receive_data(response, RESPONSE_LEN, 200) != ESP_OK) {
+    // 3. UART-Puffer leeren
+    uint8_t dummy;
+    while (uart_read_bytes(E32_UART_PORT, &dummy, 1, 20 / portTICK_PERIOD_MS) > 0) {}
+    
+    // 4. Read Configuration Command senden (0xC1)
+    ESP_ERROR_CHECK(e32_send_data(read_cmd, CONFIG_CMD_LEN));
+    vTaskDelay(pdMS_TO_TICKS(50)); // Warten bis Befehl verarbeitet
+    
+  
+      // Antwort empfangen
+      esp_err_t result = e32_receive_data(response, RESPONSE_LEN, 200);
+      if (result != ESP_OK) {
         ESP_LOGE(TAG, "Fehler beim Empfang der Konfiguration");
+        handle_e32_error(result, "Konfigurationsantwort");
         return;
     }
+
     
-    // Zurück zum Normalmodus
+  
+    
+    // 6. Zurück zum Normalmodus
     e32_set_mode(0, 0);
-    
+    vTaskDelay(pdMS_TO_TICKS(50));
+  
+        
     // Parameter dekodieren und anzeigen
     ESP_LOGI(TAG, "Aktuelle E32-900T30D Konfiguration:");
     ESP_LOGI(TAG, "----------------------------------");
@@ -215,3 +236,49 @@ void e32_read_and_display_parameters() {
     
     ESP_LOGI(TAG, "----------------------------------");
 }
+
+void handle_e32_error(esp_err_t err, const char *operation) {
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "%s erfolgreich", operation);
+        return;
+    }
+    
+    // Speziell für UART-Fehler
+    if (err == ESP_FAIL) {
+        ESP_LOGE(TAG, "%s fehlgeschlagen (allgemeiner Fehler)", operation);
+        return;
+    }
+    
+    // Dekodierung des Fehlercodes
+    const char *err_name = esp_err_to_name(err);
+    const char *err_desc = "";
+    
+    // Benutzerdefinierte Fehlerbeschreibungen
+    switch(err) {
+        case ESP_ERR_INVALID_ARG:
+            err_desc = "Ungültiges Argument";
+            break;
+        case ESP_ERR_TIMEOUT:
+            err_desc = "Timeout aufgetreten";
+            break;
+        case ESP_ERR_NOT_SUPPORTED:
+            err_desc = "Funktion nicht unterstützt";
+            break;
+        case ESP_ERR_NO_MEM:
+            err_desc = "Kein Speicher verfügbar";
+            break;
+        default:
+            err_desc = "Unbekannter Fehler";
+    }
+    
+    ESP_LOGE(TAG, "Fehler bei %s: %s (0x%x) - %s", 
+             operation, err_name, err, err_desc);
+    
+    // Bei kritischen Fehlern evtl. Neustart
+    if (err == ESP_ERR_NO_MEM || err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Kritischer Fehler, Neustart...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
+}
+
