@@ -29,4 +29,6 @@ void e32_configure(void);
     // Parameter auslesen und anzeigen
  void  e32_read_and_display_parameters();
 
+ void handle_e32_error(esp_err_t err, const char *operation);
+
 #endif // E32_900T30D_H
