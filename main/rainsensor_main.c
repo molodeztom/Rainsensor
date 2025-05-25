@@ -51,15 +51,16 @@ RainSensor
 #include "soc/rtc_cntl_reg.h"
 #include "soc/sens_reg.h"
 #include "soc/rtc_periph.h"
-#include "driver/gpio.h"
-#include "driver/rtc_io.h"
 #include "ulp.h"
 #include "ulp_main.h"
 #include "led_strip.h"
 // #include "esp_intr_alloc.h"
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "driver/rtc_cntl.h"
-#include "e32_900t30d.h"
 #include "esp_log.h"
+#include "E32_Lora_Lib.h"
+
 // definitions
 static const char *TAG = "rainsens";
 #define BLINK_GPIO CONFIG_BLINK_GPIO
@@ -87,15 +88,12 @@ void ulp_task(void *arg);
 void BlinkTask(void *arg);
 void setup_ulp_interrupt();
 static void update_pulse_count(void);
-static void  reset_counter(void);
-
+static void reset_counter(void);
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
-
-
 
 static void IRAM_ATTR ulp_isr_handler(void *arg)
 {
@@ -109,11 +107,11 @@ static void IRAM_ATTR ulp_isr_handler(void *arg)
 }
 
 // Callback-Funktion für empfangene Daten
-static void handle_received_data(const uint8_t *data, size_t len) {
+static void handle_received_data(const uint8_t *data, size_t len)
+{
     ESP_LOGI(TAG, "Empfangene Daten (%d Bytes): %.*s", len, len, data);
     // Hier können Sie die empfangenen Daten weiterverarbeiten
 }
-
 
 void app_main(void)
 {
@@ -124,14 +122,26 @@ void app_main(void)
      */
     TaskHandle_t xBlinkTask = NULL;
     vTaskDelay(pdMS_TO_TICKS(1000));
-    esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
-    esp_log_level_set("E32-900T30D", ESP_LOG_INFO);
-    esp_log_level_set("rainsens", ESP_LOG_INFO);
-    printf("rainsensor V0.8.1 \n\n");
+    /*     esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
+        esp_log_level_set("E32-900T30D", ESP_LOG_INFO);
+        esp_log_level_set("rainsens", ESP_LOG_INFO); */
+    printf("rainsensor V0.8.2 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
+    e32_config_t config; // E32 configuration structure
+    uint8_t rx_buffer[128];
+    size_t received = 0;
+    func();                   // Call the function to print the message
+    init_io();                // initialize IO pins
+    e32_init_config(&config); // initialize E32 configuration structure
     ESP_LOGI("rainsens", "rainsensor V0.8.1 started");
-    ESP_LOGI("E32-900T30D", "E32-900T30D example started");
+    config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
+    config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
+    config.OPTION.fec = FEC_ENABLE;
+    config.CHAN = 0x06;                                 // set channel to 6 (902.875MHz)
+    sendConfiguration(&config);                         // E32 configuration structure
+    vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB)); // wait for command to be processed
+
     blink_event_group = xEventGroupCreate(); // Create the event group for task synchronization
     if (blink_event_group == NULL)
     {
@@ -139,28 +149,31 @@ void app_main(void)
         return;
     }
 
-     // E32-Modul initialisieren
-     e32_init();
-     e32_configure(); // Konfiguration des Moduls
-         // Parameter auslesen und anzeigen
+    ESP_LOGI(TAG, "send sample message");
+    char *test_msg = "Hello LoRa this is Tom! V0.12\n";
+    ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
+    vTaskDelay(pdMS_TO_TICKS(5000)); // delay for 5 seconds
+                                     // E32-Modul initialisieren
+        /* e32_init();
+        e32_configure(); // Konfiguration des Moduls
+            // Parameter auslesen und anzeigen
     e32_read_and_display_parameters();
     
-     // Callback für empfangene Daten registrieren
-     e32_set_receive_callback(handle_received_data);
-     
-     // Beispiel: Nachricht senden
-     printf("Sende Testnachricht\n");
-
-     char *test_msg = "Hello LoRa World!";
-
-         // Read Configuration Command senden (0xC1)
+        // Callback für empfangene Daten registrieren
+        e32_set_receive_callback(handle_received_data);
+    
+        // Beispiel: Nachricht senden
+        printf("Sende Testnachricht\n");
+    
+        char *test_msg = "Hello LoRa World!";
+    
+            // Read Configuration Command senden (0xC1)
     if (e32_send_data((uint8_t *)test_msg, strlen(test_msg)) != ESP_OK) {
         ESP_LOGE(TAG, "Fehler beim Senden der Testnachricht");
         return;
     }
+    */
 
-     
-  
     /* Initialize NVS */
 
     /* Configure the peripheral according to the LED type */
@@ -185,8 +198,8 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
-   
-    xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);  
+
+    xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
     xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
 
     // wait some time to get a chance to call interrupt from usp instead of wakeup
@@ -194,7 +207,7 @@ void app_main(void)
 
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
-    //reset_counter();//TODO remove
+    // reset_counter();//TODO remove
     esp_deep_sleep_start();
 }
 
@@ -304,7 +317,6 @@ static void update_timer_count(void)
     uint32_t timer_count = 1;
     esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
 
-    
     nvs_close(handle);
     uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
     printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
@@ -332,7 +344,6 @@ static void update_timer_count(void)
 
     uint32_t ulp_EDGE_COUNT_TO_WAKE_UP = (ulp_edge_count_to_wake_up & UINT16_MAX);
     printf("Edge Count to wake up: %5" PRIu32 "\n", ulp_EDGE_COUNT_TO_WAKE_UP);
-
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
                            ((uint32_t)ulp_TIMER_LOW_H << 16);
@@ -416,7 +427,7 @@ void ulp_task(void *arg)
         // Überprüfe den Stack-Verbrauch
         highWaterMark = uxTaskGetStackHighWaterMark(NULL);
         printf("Stack High Water Mark: %d\n", highWaterMark);
-         }
+    }
 }
 
 void BlinkTask(void *arg)
@@ -437,12 +448,11 @@ void BlinkTask(void *arg)
     led_strip_refresh(led_strip);
     vTaskDelay(pdMS_TO_TICKS(1000));
     xEventGroupSetBits(blink_event_group, TASK_DONE_BIT); // Set the event group bit to signal task completion
-    led_strip_clear(led_strip); // Clear the LED strip
+    led_strip_clear(led_strip);                           // Clear the LED strip
 
     ESP_LOGI(TAG, "BlinkTask finished, deleting task");
-    vTaskDelete(NULL); // Delete the task when done     
+    vTaskDelete(NULL); // Delete the task when done
 }
-
 
 void setup_ulp_interrupt()
 {
@@ -489,4 +499,3 @@ static void reset_counter(void)
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
 }
-

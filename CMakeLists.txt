@@ -9,6 +9,7 @@ execute_process(
 )
 add_compile_definitions(APP_VERSION="${GIT_VERSION}")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+set(EXTRA_COMPONENT_DIRS "D:/Projects/E32_Lora_Lib")
 project(Rainsensor)
 
 

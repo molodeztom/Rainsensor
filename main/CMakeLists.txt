@@ -1,5 +1,6 @@
-idf_component_register(SRCS "e32_900T30.c" "rainsensor_main.c"
-                    INCLUDE_DIRS ""
+idf_component_register(SRCS "rainsensor_main.c"
+                    REQUIRES E32_Lora_Lib 
+                    INCLUDE_DIRS "."
                     REQUIRES driver soc nvs_flash ulp)
 #
 # ULP support additions to component CMakeLists.txt.
