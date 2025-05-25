@@ -1,6 +1,6 @@
 # Visual Studio Code settings
 .vscode/
-.vscode/*
+!.vscode/settings.json  # <-- Keep this file, ignore others in .vscode/
 
 # ESP-IDF build artifacts
 build/
