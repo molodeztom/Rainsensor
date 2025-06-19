@@ -148,13 +148,33 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to create event group");
         return;
     }
-
+while(1){
     ESP_LOGI(TAG, "send sample message");
     char *test_msg = "Hello LoRa this is Tom! V0.12\n";
     ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
-    vTaskDelay(pdMS_TO_TICKS(5000)); // delay for 5 seconds
+    vTaskDelay(pdMS_TO_TICKS(8000)); // delay for 5 seconds
+
+    esp_err_t err = e32_receive_data(rx_buffer, sizeof(rx_buffer), &received);
+        
+        if (err == ESP_OK && received > 0) {
+            printf("Received %d bytes: ", (int)received);
+            for (size_t i = 0; i < received; i++) {
+                printf("%c", rx_buffer[i]);
+            }
+            printf("\n");
+        } else if (err == ESP_ERR_TIMEOUT) {
+            printf("No data received (timeout)\n");
+        } else {
+            printf("Receive error: %s\n", esp_err_to_name(err));
+        }
+
+    }
+
+     vTaskDelay(pdMS_TO_TICKS(8000)); // delay for 5 seconds
+
+    /*
                                      // E32-Modul initialisieren
-        /* e32_init();
+      e32_init();
         e32_configure(); // Konfiguration des Moduls
             // Parameter auslesen und anzeigen
     e32_read_and_display_parameters();
