@@ -38,6 +38,7 @@ RainSensor
   20250401  V0.7.1          Add interrupt handler for ulp wakeup
   20250404  V0.8.0          Add blink task to check if a longer task in main is working and blocks deep sleep
   20250405  V0.8.1          Add E32-900T30D LoRa module to send data
+  20250625  V0.8.2          E32 module replaced now using E32_Lora_Lib
   */
 
 #include <stdio.h>
