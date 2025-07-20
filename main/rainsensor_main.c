@@ -41,6 +41,7 @@ RainSensor
   20250625  V0.8.2          E32 module replaced now using E32_Lora_Lib
   20250635  V0.9.1          add task to receive data (did not do that because it is all in a sequence)
   20250720  V0.9.2          use separate while loop for receiving data   
+  20250720  V0.9.3          filter with magic bytes turned off, pull up resistor for RX activated
   */
 
 #include <stdio.h>
@@ -79,20 +80,24 @@ EventGroupHandle_t blink_event_group;
 #define TASK_DONE_BIT (1 << 0) // Bitmask for the event group
 
 // forward declarations
+void print_buffer_hex(const uint8_t *buf, size_t len);
+void test_for_garbage_bytes(const uint8_t *buf, size_t len);
 static void init_ulp_program(void);
 static void update_timer_count(void);
 static void configure_led(void);
-uint32_t calculate_time_ms(uint64_t ticks);
-uint64_t calculate_ticks_from_seconds(double seconds);
-uint16_t calculate_increments_for_interval(double interval_seconds);
-void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
+static void update_pulse_count(void);
+static void reset_counter(void);
+static void IRAM_ATTR ulp_isr_handler(void *arg);
 void signal_from_ulp();
 void ulp_task(void *arg);
 void BlinkTask(void *arg);
 void setup_ulp_interrupt();
-static void update_pulse_count(void);
-static void reset_counter(void);
-void print_buffer_hex(const uint8_t *buf, size_t len);
+uint32_t calculate_time_ms(uint64_t ticks);
+uint64_t calculate_ticks_from_seconds(double seconds);
+uint16_t calculate_increments_for_interval(double interval_seconds);
+void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
+
+// ...existing code...
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -125,6 +130,8 @@ void app_main(void)
         esp_log_level_set("rainsens", ESP_LOG_INFO); */
     printf("rainsensor V0.9.3 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
+    printf("E32_Lora_Lib version: %s\n", e32_lora_lib_get_version());
+    printf("E32_Lora_Lib git version: %s\n", E32_LORA_LIB_GIT_VERSION);
 
     e32_config_t config; // E32 configuration structure
     uint8_t rx_buffer[128];
@@ -192,6 +199,8 @@ vTaskDelay(pdMS_TO_TICKS(2000));
             }
             printf("\n");
             print_buffer_hex(rx_buffer, total_received);
+            // Test for garbage bytes at start
+            test_for_garbage_bytes(rx_buffer, total_received);
         } else if (total_received > 0) {
             printf("Partial message received (no terminator): ");
             for (size_t i = 0; i < total_received; i++) {
@@ -199,6 +208,8 @@ vTaskDelay(pdMS_TO_TICKS(2000));
             }
             printf("\n");
             print_buffer_hex(rx_buffer, total_received);
+            // Test for garbage bytes at start
+            test_for_garbage_bytes(rx_buffer, total_received);
         } else {
             printf("No reply received within timeout\n");
         }
@@ -531,6 +542,26 @@ static void reset_counter(void)
     ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
+}
+
+// Optional: Test function to check for garbage bytes in received buffer
+static int garbage_error_counter = 0;
+void test_for_garbage_bytes(const uint8_t *buf, size_t len) {
+    // Garbage: any non-printable ASCII before first printable char
+    size_t i = 0;
+    while (i < len && (buf[i] < 0x20 || buf[i] > 0x7E)) {
+        i++;
+    }
+    if (i > 0) {
+        garbage_error_counter++;
+        ESP_LOGW("rainsens", "Garbage bytes detected at start of message (%d bytes):", (int)i);
+        printf("[GARBAGE HEX]: ");
+        for (size_t j = 0; j < i; ++j) {
+            printf("%02X ", buf[j]);
+        }
+        printf("\n");
+        ESP_LOGW("rainsens", "Total garbage errors so far: %d", garbage_error_counter);
+    }
 }
 
 void print_buffer_hex(const uint8_t *buf, size_t len) {
