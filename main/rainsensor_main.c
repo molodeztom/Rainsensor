@@ -92,6 +92,7 @@ void BlinkTask(void *arg);
 void setup_ulp_interrupt();
 static void update_pulse_count(void);
 static void reset_counter(void);
+void print_buffer_hex(const uint8_t *buf, size_t len);
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -161,7 +162,7 @@ void app_main(void)
         uint32_t waited_ms = 0;
         esp_err_t err = ESP_OK;
         bool got_terminator = false;
-vtatkdelay(pdMS_TO_TICKS(50)); // wait before sending the next message
+vTaskDelay(pdMS_TO_TICKS(2000)); 
         ESP_LOGI(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
         while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE) {
             size_t received = 0;
@@ -190,12 +191,14 @@ vtatkdelay(pdMS_TO_TICKS(50)); // wait before sending the next message
                 printf("%c", rx_buffer[i]);
             }
             printf("\n");
+            print_buffer_hex(rx_buffer, total_received);
         } else if (total_received > 0) {
             printf("Partial message received (no terminator): ");
             for (size_t i = 0; i < total_received; i++) {
                 printf("%c", rx_buffer[i]);
             }
             printf("\n");
+            print_buffer_hex(rx_buffer, total_received);
         } else {
             printf("No reply received within timeout\n");
         }
@@ -528,4 +531,12 @@ static void reset_counter(void)
     ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
+}
+
+void print_buffer_hex(const uint8_t *buf, size_t len) {
+    printf("[HEX]: ");
+    for (size_t i = 0; i < len; i++) {
+        printf("%02X ", buf[i]);
+    }
+    printf("\n");
 }
