@@ -42,6 +42,7 @@ RainSensor
   20250635  V0.9.1          add task to receive data (did not do that because it is all in a sequence)
   20250720  V0.9.2          use separate while loop for receiving data   
   20250720  V0.9.3          filter with magic bytes turned off, pull up resistor for RX activated
+  20250720  V0.9.4          test for garbage bytes and print number of errors
   */
 
 #include <stdio.h>
@@ -67,6 +68,7 @@ RainSensor
 
 // definitions
 static const char *TAG = "rainsens";
+#define RAINSENSOR_VERSION "V0.9.4"
 #define BLINK_GPIO CONFIG_BLINK_GPIO
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 // #define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
@@ -97,7 +99,7 @@ uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
 void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
 
-// ...existing code...
+
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -128,7 +130,7 @@ void app_main(void)
     /*     esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
         esp_log_level_set("E32-900T30D", ESP_LOG_INFO);
         esp_log_level_set("rainsens", ESP_LOG_INFO); */
-    printf("rainsensor V0.9.3 \n\n");
+    printf("rainsensor %s\n\n", RAINSENSOR_VERSION);
     printf("Firmware Version: %s\n", APP_VERSION);
     printf("E32_Lora_Lib version: %s\n", e32_lora_lib_get_version());
     printf("E32_Lora_Lib git version: %s\n", E32_LORA_LIB_GIT_VERSION);
@@ -155,9 +157,11 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to create event group");
         return;
     }
+    int send_counter = 1;
     while (1) {
         ESP_LOGI(TAG, "send sample message");
-        char *test_msg = "Hello LoRa this is Tom! V0.12\n";
+        char test_msg[64];
+        snprintf(test_msg, sizeof(test_msg), "Hello Olga! %d\n", send_counter++);
         ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
 
         // Wait for reply up to 5 seconds, polling every 200ms
@@ -169,7 +173,7 @@ void app_main(void)
         uint32_t waited_ms = 0;
         esp_err_t err = ESP_OK;
         bool got_terminator = false;
-vTaskDelay(pdMS_TO_TICKS(2000)); 
+        vTaskDelay(pdMS_TO_TICKS(2000)); 
         ESP_LOGI(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
         while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE) {
             size_t received = 0;
@@ -546,6 +550,7 @@ static void reset_counter(void)
 
 // Optional: Test function to check for garbage bytes in received buffer
 static int garbage_error_counter = 0;
+static int message_counter = 0;
 void test_for_garbage_bytes(const uint8_t *buf, size_t len) {
     // Garbage: any non-printable ASCII before first printable char
     size_t i = 0;
@@ -561,6 +566,10 @@ void test_for_garbage_bytes(const uint8_t *buf, size_t len) {
         }
         printf("\n");
         ESP_LOGW("rainsens", "Total garbage errors so far: %d", garbage_error_counter);
+    }
+    message_counter++;
+    if (message_counter % 10 == 0) {
+        printf("[INFO] Garbage error counter after %d messages: %d\n", message_counter, garbage_error_counter);
     }
 }
 
