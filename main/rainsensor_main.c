@@ -39,6 +39,8 @@ RainSensor
   20250404  V0.8.0          Add blink task to check if a longer task in main is working and blocks deep sleep
   20250405  V0.8.1          Add E32-900T30D LoRa module to send data
   20250625  V0.8.2          E32 module replaced now using E32_Lora_Lib
+  20250635  V0.9.1          add task to receive data (did not do that because it is all in a sequence)
+  20250720  V0.9.2          use separate while loop for receiving data   
   */
 
 #include <stdio.h>
@@ -107,12 +109,6 @@ static void IRAM_ATTR ulp_isr_handler(void *arg)
     }
 }
 
-// Callback-Funktion für empfangene Daten
-static void handle_received_data(const uint8_t *data, size_t len)
-{
-    ESP_LOGI(TAG, "Empfangene Daten (%d Bytes): %.*s", len, len, data);
-    // Hier können Sie die empfangenen Daten weiterverarbeiten
-}
 
 void app_main(void)
 {
@@ -126,7 +122,7 @@ void app_main(void)
     /*     esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
         esp_log_level_set("E32-900T30D", ESP_LOG_INFO);
         esp_log_level_set("rainsens", ESP_LOG_INFO); */
-    printf("rainsensor V0.8.2 \n\n");
+    printf("rainsensor V0.9.3 \n\n");
     printf("Firmware Version: %s\n", APP_VERSION);
 
     e32_config_t config; // E32 configuration structure
@@ -141,6 +137,8 @@ void app_main(void)
     config.OPTION.fec = FEC_ENABLE;
     config.CHAN = 0x06;                                 // set channel to 6 (902.875MHz)
     sendConfiguration(&config);                         // E32 configuration structure
+  
+
     vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB)); // wait for command to be processed
 
     blink_event_group = xEventGroupCreate(); // Create the event group for task synchronization
@@ -149,52 +147,63 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to create event group");
         return;
     }
-while(1){
-    ESP_LOGI(TAG, "send sample message");
-    char *test_msg = "Hello LoRa this is Tom! V0.12\n";
-    ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
-    vTaskDelay(pdMS_TO_TICKS(8000)); // delay for 5 seconds
+    while (1) {
+        ESP_LOGI(TAG, "send sample message");
+        char *test_msg = "Hello LoRa this is Tom! V0.12\n";
+        ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
 
-    esp_err_t err = e32_receive_data(rx_buffer, sizeof(rx_buffer), &received);
-        
-        if (err == ESP_OK && received > 0) {
-            printf("Received %d bytes: ", (int)received);
-            for (size_t i = 0; i < received; i++) {
+        // Wait for reply up to 5 seconds, polling every 200ms
+        #define LORA_RX_BUFFER_SIZE 128
+        #define LORA_REPLY_TIMEOUT_MS 5000
+        #define LORA_RECEIVE_POLL_MS 200
+        uint8_t rx_buffer[LORA_RX_BUFFER_SIZE];
+        size_t total_received = 0;
+        uint32_t waited_ms = 0;
+        esp_err_t err = ESP_OK;
+        bool got_terminator = false;
+vtatkdelay(pdMS_TO_TICKS(50)); // wait before sending the next message
+        ESP_LOGI(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
+        while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE) {
+            size_t received = 0;
+            err = e32_receive_data(rx_buffer + total_received, LORA_RX_BUFFER_SIZE - total_received, &received);
+            if (err == ESP_OK && received > 0) {
+                // Check for terminator in newly received data
+                for (size_t i = 0; i < received; i++) {
+                    if (rx_buffer[total_received + i] == '!') {
+                        got_terminator = true;
+                        total_received += i + 1; // include the terminator
+                        break;
+                    }
+                }
+                if (!got_terminator) {
+                    total_received += received;
+                }
+            }
+            if (!got_terminator) {
+                vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_POLL_MS));
+                waited_ms += LORA_RECEIVE_POLL_MS;
+            }
+        }
+        if (got_terminator) {
+            printf("Received message: ");
+            for (size_t i = 0; i < total_received; i++) {
                 printf("%c", rx_buffer[i]);
             }
             printf("\n");
-        } else if (err == ESP_ERR_TIMEOUT) {
-            printf("No data received (timeout)\n");
+        } else if (total_received > 0) {
+            printf("Partial message received (no terminator): ");
+            for (size_t i = 0; i < total_received; i++) {
+                printf("%c", rx_buffer[i]);
+            }
+            printf("\n");
         } else {
-            printf("Receive error: %s\n", esp_err_to_name(err));
+            printf("No reply received within timeout\n");
         }
 
+        // ... process answer or timeout ...
+        // Optional: sleep before next cycle
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
-
-     vTaskDelay(pdMS_TO_TICKS(8000)); // delay for 5 seconds
-
-    /*
-                                     // E32-Modul initialisieren
-      e32_init();
-        e32_configure(); // Konfiguration des Moduls
-            // Parameter auslesen und anzeigen
-    e32_read_and_display_parameters();
-    
-        // Callback für empfangene Daten registrieren
-        e32_set_receive_callback(handle_received_data);
-    
-        // Beispiel: Nachricht senden
-        printf("Sende Testnachricht\n");
-    
-        char *test_msg = "Hello LoRa World!";
-    
-            // Read Configuration Command senden (0xC1)
-    if (e32_send_data((uint8_t *)test_msg, strlen(test_msg)) != ESP_OK) {
-        ESP_LOGE(TAG, "Fehler beim Senden der Testnachricht");
-        return;
-    }
-    */
-
     /* Initialize NVS */
 
     /* Configure the peripheral according to the LED type */
