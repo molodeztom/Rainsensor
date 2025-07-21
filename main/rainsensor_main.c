@@ -1,7 +1,6 @@
 /**************************************************************************
 RainSensor
 
-
   Hardware:
   ESP32-S3-DevKitC-1 mit Wroom N16R8
   LoRa E32-900T30D connected M0 M1 and Rx Tx
@@ -43,7 +42,7 @@ RainSensor
   20250720  V0.9.2          use separate while loop for receiving data   
   20250720  V0.9.3          filter with magic bytes turned off, pull up resistor for RX activated
   20250720  V0.9.4          test for garbage bytes and print number of errors
-  20250721  V0.9.5          separate send/receive LoRa functions; add prototypes; code refactor
+  20250721  V0.9.6          Add comment at beginning, update date and version number in comment and across file
   */
 
 #include <stdio.h>
@@ -67,14 +66,23 @@ RainSensor
 #include "esp_log.h"
 #include "E32_Lora_Lib.h"
 
-// definitions
-static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.5"
-#define BLINK_GPIO CONFIG_BLINK_GPIO
-#define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
-// #define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
-#define ulp_wakeup_period 1000                    // after ulp is halted it sleeps until next wakeup period
-static const double wakeup_interval_seconds = 20; // time to wake cpu if at minimum one input pulse detected
+// =====================
+// Application Parameters
+// =====================
+
+// LoRa communication parameters
+#define LORA_RX_BUFFER_SIZE 128      // Buffer size for received LoRa messages
+#define LORA_REPLY_TIMEOUT_MS 5000   // Timeout (ms) to wait for a reply after sending a message
+#define LORA_RECEIVE_POLL_MS 200     // Polling interval (ms) when waiting for a reply
+
+// LED and ULP parameters
+#define BLINK_GPIO CONFIG_BLINK_GPIO // GPIO for addressable LED strip
+#define ulp_wakeup_period 1000       // ULP wakeup period in ms
+static const double wakeup_interval_seconds = 20; // Time to wake CPU if at least one input pulse detected
+#define RTC_SLOW_CLK_FREQ 136000     // RTC slow clock frequency (internal 136 kHz oscillator)
+// #define RTC_SLOW_CLK_FREQ 68359   // RTC slow clock frequency (17.5 MHz oscillator / 256)
+#define TASK_DONE_BIT (1 << 0)       // Bitmask for event group
+
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
 extern const uint8_t ulp_main_bin_end[] asm("_binary_ulp_main_bin_end");
@@ -102,7 +110,8 @@ void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
 void send_lora_message(int *send_counter);
 void receive_lora_message(void);
 
-
+static const char *TAG = "rainsens";
+#define RAINSENSOR_VERSION "V0.9.6"
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -161,13 +170,7 @@ void app_main(void)
         return;
     }
     int send_counter = 1;
-    while (1) {
-        send_lora_message(&send_counter);
-        receive_lora_message();
-        // ... process answer or timeout ...
-        // Optional: sleep before next cycle
-        vTaskDelay(pdMS_TO_TICKS(3000));
-    }
+
     /* Initialize NVS */
 
     /* Configure the peripheral according to the LED type */
@@ -195,6 +198,14 @@ void app_main(void)
 
     xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
     xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
+
+  //  while (1) {
+        send_lora_message(&send_counter);
+        receive_lora_message();
+        // ... process answer or timeout ...
+        // Optional: sleep before next cycle
+        vTaskDelay(pdMS_TO_TICKS(3000));
+   // }
 
     // wait some time to get a chance to call interrupt from usp instead of wakeup
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -278,6 +289,7 @@ static void update_pulse_count(void)
     const char *nvs_namespace = "plusecnt";
     const char *count_key = "count";
 
+    // [ULP] NVS initialization for pulse count storage
     ESP_ERROR_CHECK(nvs_flash_init());
     nvs_handle_t handle;
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
