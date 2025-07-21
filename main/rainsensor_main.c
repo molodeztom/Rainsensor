@@ -44,6 +44,7 @@ RainSensor
   20250720  V0.9.4          test for garbage bytes and print number of errors
   20250721  V0.9.6          Add comment at beginning, update date and version number in comment and across file
   20250721  V0.9.7          Add debug output for received data and from ulp 
+  20250721  V0.9.8          Send number of pulses in message
   */
 
 #include <stdio.h>
@@ -108,11 +109,11 @@ uint32_t calculate_time_ms(uint64_t ticks);
 uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
 void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
-void send_lora_message(int *send_counter);
+void send_lora_message(uint32_t pulse_count);
 void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.6"
+#define RAINSENSOR_VERSION "V0.9.8"
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -171,6 +172,7 @@ void app_main(void)
         return;
     }
     int send_counter = 1;
+    uint32_t pulse_count = 0;
 
     /* Initialize NVS */
 
@@ -193,6 +195,11 @@ void app_main(void)
         printf("ULP wakeup, saving pulse count\n");
         update_timer_count();
         update_pulse_count();
+        // Read updated pulse_count from NVS
+        nvs_handle_t handle;
+        ESP_ERROR_CHECK(nvs_open("plusecnt", NVS_READONLY, &handle));
+        ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
+        nvs_close(handle);
     }
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
@@ -200,13 +207,11 @@ void app_main(void)
     xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
     xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
 
-  //  while (1) {
-        send_lora_message(&send_counter);
-        receive_lora_message();
-        // ... process answer or timeout ...
-        // Optional: sleep before next cycle
-        vTaskDelay(pdMS_TO_TICKS(3000));
-   // }
+    send_lora_message(pulse_count);
+    receive_lora_message();
+    // ... process answer or timeout ...
+    // Optional: sleep before next cycle
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
     // wait some time to get a chance to call interrupt from usp instead of wakeup
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -552,11 +557,11 @@ void print_buffer_hex(const uint8_t *buf, size_t len) {
     printf("\n");
 }
 
-void send_lora_message(int *send_counter) {
-    ESP_LOGI(TAG, "send sample message");
-    char test_msg[64];
-    snprintf(test_msg, sizeof(test_msg), "Hello Olga! %d\n", (*send_counter)++);
-    ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
+void send_lora_message(uint32_t pulse_count) {
+    ESP_LOGI(TAG, "send pulse count message");
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Number of pulses: %lu\n", (unsigned long)pulse_count);
+    ESP_ERROR_CHECK(e32_send_data((uint8_t *)msg, strlen(msg)));
 }
 
 void receive_lora_message() {
