@@ -43,6 +43,7 @@ RainSensor
   20250720  V0.9.3          filter with magic bytes turned off, pull up resistor for RX activated
   20250720  V0.9.4          test for garbage bytes and print number of errors
   20250721  V0.9.6          Add comment at beginning, update date and version number in comment and across file
+  20250721  V0.9.7          Add debug output for received data and from ulp 
   */
 
 #include <stdio.h>
@@ -241,6 +242,13 @@ static void init_ulp_program(void)
     ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = 8;
 
+    // Debug: Print ULP config variables
+    printf("[DEBUG] ULP io_number (RTC IO): %d (should match GPIO8 RTC IO number)\n", (int)ulp_io_number);
+    printf("[DEBUG] ULP edge_count_to_wake_up: %d\n", (int)ulp_edge_count_to_wake_up);
+    printf("[DEBUG] ULP debounce_counter: %d\n", (int)ulp_debounce_counter);
+    printf("[DEBUG] ULP debounce_max_count: %d\n", (int)ulp_debounce_max_count);
+    printf("[DEBUG] ULP edge_count (before sleep): %d\n", (int)ulp_edge_count);
+
     // ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
     ulp_timer_count_high = 0;
@@ -310,6 +318,11 @@ static void update_pulse_count(void)
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
     printf("Wrote updated pulse count to NVS: %5" PRIu32 "\n", pulse_count);
+
+    // Debug: Print ULP variables after update
+    printf("[DEBUG] ULP edge_count (after wakeup): %d\n", (int)ulp_edge_count);
+    printf("[DEBUG] ULP io_number (RTC IO): %d\n", (int)ulp_io_number);
+    printf("[DEBUG] ULP edge_count_to_wake_up: %d\n", (int)ulp_edge_count_to_wake_up);
 }
 
 static void update_timer_count(void)
