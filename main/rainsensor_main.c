@@ -43,6 +43,7 @@ RainSensor
   20250720  V0.9.2          use separate while loop for receiving data   
   20250720  V0.9.3          filter with magic bytes turned off, pull up resistor for RX activated
   20250720  V0.9.4          test for garbage bytes and print number of errors
+  20250721  V0.9.5          separate send/receive LoRa functions; add prototypes; code refactor
   */
 
 #include <stdio.h>
@@ -68,7 +69,7 @@ RainSensor
 
 // definitions
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.4"
+#define RAINSENSOR_VERSION "V0.9.5"
 #define BLINK_GPIO CONFIG_BLINK_GPIO
 #define RTC_SLOW_CLK_FREQ 136000 // when RTC_CLCK Source = internal 136 kHz oscillator
 // #define RTC_SLOW_CLK_FREQ 68359 //when RTC_CLCK Source = internal 17.5 MHz oscillator / 256
@@ -98,6 +99,8 @@ uint32_t calculate_time_ms(uint64_t ticks);
 uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
 void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
+void send_lora_message(int *send_counter);
+void receive_lora_message(void);
 
 
 
@@ -159,65 +162,8 @@ void app_main(void)
     }
     int send_counter = 1;
     while (1) {
-        ESP_LOGI(TAG, "send sample message");
-        char test_msg[64];
-        snprintf(test_msg, sizeof(test_msg), "Hello Olga! %d\n", send_counter++);
-        ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
-
-        // Wait for reply up to 5 seconds, polling every 200ms
-        #define LORA_RX_BUFFER_SIZE 128
-        #define LORA_REPLY_TIMEOUT_MS 5000
-        #define LORA_RECEIVE_POLL_MS 200
-        uint8_t rx_buffer[LORA_RX_BUFFER_SIZE];
-        size_t total_received = 0;
-        uint32_t waited_ms = 0;
-        esp_err_t err = ESP_OK;
-        bool got_terminator = false;
-        vTaskDelay(pdMS_TO_TICKS(2000)); 
-        ESP_LOGI(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
-        while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE) {
-            size_t received = 0;
-            err = e32_receive_data(rx_buffer + total_received, LORA_RX_BUFFER_SIZE - total_received, &received);
-            if (err == ESP_OK && received > 0) {
-                // Check for terminator in newly received data
-                for (size_t i = 0; i < received; i++) {
-                    if (rx_buffer[total_received + i] == '!') {
-                        got_terminator = true;
-                        total_received += i + 1; // include the terminator
-                        break;
-                    }
-                }
-                if (!got_terminator) {
-                    total_received += received;
-                }
-            }
-            if (!got_terminator) {
-                vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_POLL_MS));
-                waited_ms += LORA_RECEIVE_POLL_MS;
-            }
-        }
-        if (got_terminator) {
-            printf("Received message: ");
-            for (size_t i = 0; i < total_received; i++) {
-                printf("%c", rx_buffer[i]);
-            }
-            printf("\n");
-            print_buffer_hex(rx_buffer, total_received);
-            // Test for garbage bytes at start
-            test_for_garbage_bytes(rx_buffer, total_received);
-        } else if (total_received > 0) {
-            printf("Partial message received (no terminator): ");
-            for (size_t i = 0; i < total_received; i++) {
-                printf("%c", rx_buffer[i]);
-            }
-            printf("\n");
-            print_buffer_hex(rx_buffer, total_received);
-            // Test for garbage bytes at start
-            test_for_garbage_bytes(rx_buffer, total_received);
-        } else {
-            printf("No reply received within timeout\n");
-        }
-
+        send_lora_message(&send_counter);
+        receive_lora_message();
         // ... process answer or timeout ...
         // Optional: sleep before next cycle
         vTaskDelay(pdMS_TO_TICKS(3000));
@@ -579,4 +525,67 @@ void print_buffer_hex(const uint8_t *buf, size_t len) {
         printf("%02X ", buf[i]);
     }
     printf("\n");
+}
+
+void send_lora_message(int *send_counter) {
+    ESP_LOGI(TAG, "send sample message");
+    char test_msg[64];
+    snprintf(test_msg, sizeof(test_msg), "Hello Olga! %d\n", (*send_counter)++);
+    ESP_ERROR_CHECK(e32_send_data((uint8_t *)test_msg, strlen(test_msg)));
+}
+
+void receive_lora_message() {
+    // Wait for reply up to 5 seconds, polling every 200ms
+    #define LORA_RX_BUFFER_SIZE 128
+    #define LORA_REPLY_TIMEOUT_MS 5000
+    #define LORA_RECEIVE_POLL_MS 200
+    uint8_t rx_buffer[LORA_RX_BUFFER_SIZE];
+    size_t total_received = 0;
+    uint32_t waited_ms = 0;
+    esp_err_t err = ESP_OK;
+    bool got_terminator = false;
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGI(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
+    while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE) {
+        size_t received = 0;
+        err = e32_receive_data(rx_buffer + total_received, LORA_RX_BUFFER_SIZE - total_received, &received);
+        if (err == ESP_OK && received > 0) {
+            // Check for terminator in newly received data
+            for (size_t i = 0; i < received; i++) {
+                if (rx_buffer[total_received + i] == '!') {
+                    got_terminator = true;
+                    total_received += i + 1; // include the terminator
+                    break;
+                }
+            }
+            if (!got_terminator) {
+                total_received += received;
+            }
+        }
+        if (!got_terminator) {
+            vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_POLL_MS));
+            waited_ms += LORA_RECEIVE_POLL_MS;
+        }
+    }
+    if (got_terminator) {
+        printf("Received message: ");
+        for (size_t i = 0; i < total_received; i++) {
+            printf("%c", rx_buffer[i]);
+        }
+        printf("\n");
+        print_buffer_hex(rx_buffer, total_received);
+        // Test for garbage bytes at start
+        test_for_garbage_bytes(rx_buffer, total_received);
+    } else if (total_received > 0) {
+        printf("Partial message received (no terminator): ");
+        for (size_t i = 0; i < total_received; i++) {
+            printf("%c", rx_buffer[i]);
+        }
+        printf("\n");
+        print_buffer_hex(rx_buffer, total_received);
+        // Test for garbage bytes at start
+        test_for_garbage_bytes(rx_buffer, total_received);
+    } else {
+        printf("No reply received within timeout\n");
+    }
 }
