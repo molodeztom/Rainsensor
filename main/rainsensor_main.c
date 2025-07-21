@@ -221,7 +221,8 @@ void app_main(void)
         format_time(ms, &hours, &minutes, &seconds);
     }
 
-    send_lora_message(pulse_count, hours, minutes, seconds, ms, send_counter);
+    // Use ulp_timer_count as send_counter since timer_count is undeclared
+    send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
     receive_lora_message();
     // ... process answer or timeout ...
     // Optional: sleep before next cycle
@@ -436,12 +437,15 @@ uint16_t calculate_increments_for_interval(double interval_seconds)
     }
 }
 
+static volatile bool send_lora_on_ulp = false;
+
 void signal_from_ulp()
 {
     ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
     interrupt_count++;
     printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
     update_pulse_count();
+    send_lora_on_ulp = true; // Set flag to send LoRa message in task
 }
 
 void ulp_task(void *arg)
@@ -456,6 +460,20 @@ void ulp_task(void *arg)
         UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
         printf("Stack High Water Mark: %d\n", highWaterMark);
         signal_from_ulp(); // Führe die spezifische Funktion aus
+        if (send_lora_on_ulp) {
+            // Get latest pulse count from NVS
+            nvs_handle_t handle;
+            uint32_t pulse_count = 0;
+            ESP_ERROR_CHECK(nvs_open("plusecnt", NVS_READONLY, &handle));
+            ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
+            nvs_close(handle);
+            // Get time from ULP
+            uint32_t ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
+            int hours = 0, minutes = 0, seconds = 0;
+            format_time(ms, &hours, &minutes, &seconds);
+            send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
+            send_lora_on_ulp = false;
+        }
         led_strip_set_pixel(led_strip, 0, 0, 0, 200);
         /* Refresh the strip to send data */
         led_strip_refresh(led_strip); // Überprüfe den freien Speicher
