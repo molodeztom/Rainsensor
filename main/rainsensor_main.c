@@ -45,6 +45,8 @@ RainSensor
   20250721  V0.9.6          Add comment at beginning, update date and version number in comment and across file
   20250721  V0.9.7          Add debug output for received data and from ulp 
   20250721  V0.9.8          Send number of pulses in message
+  20250721  V0.9.9          Send a packed struct with pulse count and timers
+  20250721  V0.9.10         BlinkTask duration reduced to 3 seconds, debug output for send counter and checksum, struct size check before LoRa send, checksum bug fix prompt for receiver
   */
 
 #include <stdio.h>
@@ -67,6 +69,7 @@ RainSensor
 #include "driver/rtc_cntl.h"
 #include "esp_log.h"
 #include "E32_Lora_Lib.h"
+#include "communication.h"
 
 // =====================
 // Application Parameters
@@ -109,11 +112,11 @@ uint32_t calculate_time_ms(uint64_t ticks);
 uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
 void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
-void send_lora_message(uint32_t pulse_count);
+void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter);
 void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.8"
+#define RAINSENSOR_VERSION "V0.9.10"
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -207,7 +210,18 @@ void app_main(void)
     xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
     xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
 
-    send_lora_message(pulse_count);
+    // Calculate elapsed time for payload
+    uint32_t ms = 0;
+    int hours = 0, minutes = 0, seconds = 0;
+    // If ULP wakeup, get elapsed time from ULP
+    if (cause == ESP_SLEEP_WAKEUP_ULP) {
+        // ...existing code...
+        // After update_timer_count(), ms/hours/minutes/seconds are set
+        ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
+        format_time(ms, &hours, &minutes, &seconds);
+    }
+
+    send_lora_message(pulse_count, hours, minutes, seconds, ms, send_counter);
     receive_lora_message();
     // ... process answer or timeout ...
     // Optional: sleep before next cycle
@@ -456,26 +470,23 @@ void ulp_task(void *arg)
 
 void BlinkTask(void *arg)
 {
-    for (int i = 0; i < 15; i++)
+    // Blink for 3 seconds (3 cycles of 1s)
+    for (int i = 0; i < 3; i++)
     {
         led_strip_set_pixel(led_strip, 0, 230, 0, 0);
-        /* Refresh the strip to send data */
         led_strip_refresh(led_strip);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(500));
         led_strip_set_pixel(led_strip, 0, 0, 230, 0);
-        /* Refresh the strip to send data */
         led_strip_refresh(led_strip);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
     led_strip_set_pixel(led_strip, 0, 200, 200, 200);
-    /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    xEventGroupSetBits(blink_event_group, TASK_DONE_BIT); // Set the event group bit to signal task completion
-    led_strip_clear(led_strip);                           // Clear the LED strip
-
+    vTaskDelay(pdMS_TO_TICKS(500));
+    xEventGroupSetBits(blink_event_group, TASK_DONE_BIT);
+    led_strip_clear(led_strip);
     ESP_LOGI(TAG, "BlinkTask finished, deleting task");
-    vTaskDelete(NULL); // Delete the task when done
+    vTaskDelete(NULL);
 }
 
 void setup_ulp_interrupt()
@@ -557,11 +568,28 @@ void print_buffer_hex(const uint8_t *buf, size_t len) {
     printf("\n");
 }
 
-void send_lora_message(uint32_t pulse_count) {
-    ESP_LOGI(TAG, "send pulse count message");
-    char msg[64];
-    snprintf(msg, sizeof(msg), "Number of pulses: %lu\n", (unsigned long)pulse_count);
-    ESP_ERROR_CHECK(e32_send_data((uint8_t *)msg, strlen(msg)));
+void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter) {
+    ESP_LOGI(TAG, "send packed struct payload");
+    lora_payload_t payload;
+    const size_t max_payload_size = 58; // E32-900T30D max payload size
+    if (sizeof(lora_payload_t) > max_payload_size) {
+        ESP_LOGE(TAG, "ERROR: lora_payload_t size (%u bytes) exceeds LoRa E32 max payload size (%u bytes). Not sending!", (unsigned)sizeof(lora_payload_t), (unsigned)max_payload_size);
+        return;
+    }
+    snprintf(payload.elapsed_time_str, sizeof(payload.elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
+    payload.elapsed_time_ms = elapsed_ms;
+    payload.pulse_count = pulse_count;
+    payload.send_counter = send_counter;
+    payload.checksum = lora_payload_checksum(&payload);
+    ESP_LOGI(TAG, "Payload: time %s, ms %lu, pulses %lu, send_counter %lu, checksum 0x%04X",
+        payload.elapsed_time_str,
+        (unsigned long)payload.elapsed_time_ms,
+        (unsigned long)payload.pulse_count,
+        (unsigned long)payload.send_counter,
+        payload.checksum);
+    printf("[DEBUG] Send counter: %lu\n", (unsigned long)payload.send_counter);
+    printf("[DEBUG] Checksum: 0x%04X\n", payload.checksum);
+    ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
 }
 
 void receive_lora_message() {
