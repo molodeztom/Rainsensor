@@ -33,9 +33,3 @@ static inline uint16_t lora_payload_checksum(const lora_payload_t *payload) {
 // payload.checksum = lora_payload_checksum(&payload);
 // send as raw bytes: e32_send_data((uint8_t *)&payload, sizeof(payload));
 // On receiver: validate checksum before using data.
-
-// Latest changes V0.9.10 (20250721):
-// - BlinkTask duration reduced to 3 seconds
-// - Debug output for send counter and checksum
-// - Struct size check before LoRa send
-// - Checksum bug fix prompt for receiver
