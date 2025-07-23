@@ -39,15 +39,16 @@ RainSensor
   20250405  V0.8.1          Add E32-900T30D LoRa module to send data
   20250625  V0.8.2          E32 module replaced now using E32_Lora_Lib
   20250635  V0.9.1          add task to receive data (did not do that because it is all in a sequence)
-  20250720  V0.9.2          use separate while loop for receiving data   
+  20250720  V0.9.2          use separate while loop for receiving data
   20250720  V0.9.3          filter with magic bytes turned off, pull up resistor for RX activated
   20250720  V0.9.4          test for garbage bytes and print number of errors
   20250721  V0.9.6          Add comment at beginning, update date and version number in comment and across file
-  20250721  V0.9.7          Add debug output for received data and from ulp 
+  20250721  V0.9.7          Add debug output for received data and from ulp
   20250721  V0.9.8          Send number of pulses in message
   20250721  V0.9.9          Send a packed struct with pulse count and timers
   20250721  V0.9.10         BlinkTask duration reduced to 3 seconds, debug output for send counter and checksum, struct size check before LoRa send, checksum bug fix prompt for receiver
   20250722  V0.9.11         Test without interrupt
+  20250723  V0.9.12         Test with interrupt worked, all functions not needed outcommented
   */
 
 #include <stdio.h>
@@ -77,17 +78,17 @@ RainSensor
 // =====================
 
 // LoRa communication parameters
-#define LORA_RX_BUFFER_SIZE 128      // Buffer size for received LoRa messages
-#define LORA_REPLY_TIMEOUT_MS 5000   // Timeout (ms) to wait for a reply after sending a message
-#define LORA_RECEIVE_POLL_MS 200     // Polling interval (ms) when waiting for a reply
+#define LORA_RX_BUFFER_SIZE 128    // Buffer size for received LoRa messages
+#define LORA_REPLY_TIMEOUT_MS 5000 // Timeout (ms) to wait for a reply after sending a message
+#define LORA_RECEIVE_POLL_MS 200   // Polling interval (ms) when waiting for a reply
 
 // LED and ULP parameters
-#define BLINK_GPIO CONFIG_BLINK_GPIO // GPIO for addressable LED strip
-#define ulp_wakeup_period 1000       // ULP wakeup period in ms
+#define BLINK_GPIO CONFIG_BLINK_GPIO              // GPIO for addressable LED strip
+#define ulp_wakeup_period 1000                    // ULP wakeup period in ms
 static const double wakeup_interval_seconds = 60; // Time to wake CPU if at least one input pulse detected
-#define RTC_SLOW_CLK_FREQ 136000     // RTC slow clock frequency (internal 136 kHz oscillator)
+#define RTC_SLOW_CLK_FREQ 136000                  // RTC slow clock frequency (internal 136 kHz oscillator)
 // #define RTC_SLOW_CLK_FREQ 68359   // RTC slow clock frequency (17.5 MHz oscillator / 256)
-#define TASK_DONE_BIT (1 << 0)       // Bitmask for event group
+#define TASK_DONE_BIT (1 << 0) // Bitmask for event group
 
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
@@ -104,11 +105,11 @@ static void update_timer_count(void);
 static void configure_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
-static void IRAM_ATTR ulp_isr_handler(void *arg);
-void signal_from_ulp();
+//static void IRAM_ATTR ulp_isr_handler(void *arg);
+//void signal_from_ulp();
 void ulp_task(void *arg);
 void BlinkTask(void *arg);
-void setup_ulp_interrupt();
+//void setup_ulp_interrupt();
 uint32_t calculate_time_ms(uint64_t ticks);
 uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
@@ -124,7 +125,7 @@ static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
 
-static void IRAM_ATTR ulp_isr_handler(void *arg)
+/* static void IRAM_ATTR ulp_isr_handler(void *arg)
 {
     SET_PERI_REG_MASK(RTC_CNTL_INT_CLR_REG, RTC_CNTL_ULP_CP_INT_CLR_M);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -133,8 +134,7 @@ static void IRAM_ATTR ulp_isr_handler(void *arg)
     {
         portYIELD_FROM_ISR();
     }
-}
-
+} */
 
 void app_main(void)
 {
@@ -159,13 +159,14 @@ void app_main(void)
     func();                   // Call the function to print the message
     init_io();                // initialize IO pins
     e32_init_config(&config); // initialize E32 configuration structure
+    ESP_ERROR_CHECK(nvs_flash_init());
+
     ESP_LOGI("rainsens", "rainsensor V0.8.1 started");
     config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
     config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
     config.OPTION.fec = FEC_ENABLE;
-    config.CHAN = 0x06;                                 // set channel to 6 (902.875MHz)
-    sendConfiguration(&config);                         // E32 configuration structure
-  
+    config.CHAN = 0x06;         // set channel to 6 (902.875MHz)
+    sendConfiguration(&config); // E32 configuration structure
 
     vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB)); // wait for command to be processed
 
@@ -187,7 +188,7 @@ void app_main(void)
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-    //TODO reactivate Test setup_ulp_interrupt();
+    // TODO reactivate Test setup_ulp_interrupt();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
@@ -201,7 +202,7 @@ void app_main(void)
         update_pulse_count();
         // Read updated pulse_count from NVS
         nvs_handle_t handle;
-        ESP_ERROR_CHECK(nvs_open("plusecnt", NVS_READONLY, &handle));
+        ESP_ERROR_CHECK(nvs_open("pulsecnt", NVS_READONLY, &handle));
         ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
         nvs_close(handle);
     }
@@ -215,7 +216,8 @@ void app_main(void)
     uint32_t ms = 0;
     int hours = 0, minutes = 0, seconds = 0;
     // If ULP wakeup, get elapsed time from ULP
-    if (cause == ESP_SLEEP_WAKEUP_ULP) {
+    if (cause == ESP_SLEEP_WAKEUP_ULP)
+    {
         // ...existing code...
         // After update_timer_count(), ms/hours/minutes/seconds are set
         ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
@@ -315,11 +317,9 @@ static void init_ulp_program(void)
 
 static void update_pulse_count(void)
 {
-    const char *nvs_namespace = "plusecnt";
+    const char *nvs_namespace = "pulsecnt";
     const char *count_key = "count";
 
-    // [ULP] NVS initialization for pulse count storage
-    ESP_ERROR_CHECK(nvs_flash_init());
     nvs_handle_t handle;
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     uint32_t pulse_count = 0;
@@ -348,10 +348,9 @@ static void update_pulse_count(void)
 
 static void update_timer_count(void)
 {
-    const char *nvs_namespace = "plusecnt";
+    const char *nvs_namespace = "pulsecnt";
     const char *count_key = "pulse";
-    ;
-    ESP_ERROR_CHECK(nvs_flash_init());
+
     nvs_handle_t handle;
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READONLY, &handle));
     uint32_t timer_count = 1;
@@ -440,7 +439,7 @@ uint16_t calculate_increments_for_interval(double interval_seconds)
 
 static volatile bool send_lora_on_ulp = false;
 
-void signal_from_ulp()
+/* void signal_from_ulp()
 {
     ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
     interrupt_count++;
@@ -448,7 +447,7 @@ void signal_from_ulp()
     update_pulse_count();
     send_lora_on_ulp = true; // Set flag to send LoRa message in task
 }
-
+ */
 void ulp_task(void *arg)
 {
     while (1)
@@ -460,12 +459,13 @@ void ulp_task(void *arg)
         // Überprüfe den Stack-Verbrauch
         UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
         printf("Stack High Water Mark: %d\n", highWaterMark);
-        signal_from_ulp(); // Führe die spezifische Funktion aus
-        if (send_lora_on_ulp) {
+        //signal_from_ulp(); // Führe die spezifische Funktion aus
+        if (send_lora_on_ulp)
+        {
             // Get latest pulse count from NVS
             nvs_handle_t handle;
             uint32_t pulse_count = 0;
-            ESP_ERROR_CHECK(nvs_open("plusecnt", NVS_READONLY, &handle));
+            ESP_ERROR_CHECK(nvs_open("pulsecnt", NVS_READONLY, &handle));
             ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
             nvs_close(handle);
             // Get time from ULP
@@ -508,7 +508,7 @@ void BlinkTask(void *arg)
     vTaskDelete(NULL);
 }
 
-void setup_ulp_interrupt()
+/* void setup_ulp_interrupt()
 {
     esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M, ESP_INTR_FLAG_IRAM);
     if (err != ESP_OK)
@@ -521,7 +521,7 @@ void setup_ulp_interrupt()
     // ULP-Interrupt aktivieren, required!
     SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
     ESP_LOGI(TAG, "ULP interrupt enabled");
-}
+} */
 
 static void configure_led(void)
 {
@@ -542,9 +542,9 @@ static void configure_led(void)
 
 static void reset_counter(void)
 {
-    const char *nvs_namespace = "plusecnt";
+    const char *nvs_namespace = "pulsecnt";
     const char *count_key = "count";
-    ESP_ERROR_CHECK(nvs_flash_init());
+
     nvs_handle_t handle;
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     uint32_t pulse_count = 0;
@@ -557,41 +557,50 @@ static void reset_counter(void)
 // Optional: Test function to check for garbage bytes in received buffer
 static int garbage_error_counter = 0;
 static int message_counter = 0;
-void test_for_garbage_bytes(const uint8_t *buf, size_t len) {
+void test_for_garbage_bytes(const uint8_t *buf, size_t len)
+{
     // Garbage: any non-printable ASCII before first printable char
     size_t i = 0;
-    while (i < len && (buf[i] < 0x20 || buf[i] > 0x7E)) {
+    while (i < len && (buf[i] < 0x20 || buf[i] > 0x7E))
+    {
         i++;
     }
-    if (i > 0) {
+    if (i > 0)
+    {
         garbage_error_counter++;
         ESP_LOGW("rainsens", "Garbage bytes detected at start of message (%d bytes):", (int)i);
         printf("[GARBAGE HEX]: ");
-        for (size_t j = 0; j < i; ++j) {
+        for (size_t j = 0; j < i; ++j)
+        {
             printf("%02X ", buf[j]);
         }
         printf("\n");
         ESP_LOGW("rainsens", "Total garbage errors so far: %d", garbage_error_counter);
     }
     message_counter++;
-    if (message_counter % 10 == 0) {
+    if (message_counter % 10 == 0)
+    {
         printf("[INFO] Garbage error counter after %d messages: %d\n", message_counter, garbage_error_counter);
     }
 }
 
-void print_buffer_hex(const uint8_t *buf, size_t len) {
+void print_buffer_hex(const uint8_t *buf, size_t len)
+{
     printf("[HEX]: ");
-    for (size_t i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++)
+    {
         printf("%02X ", buf[i]);
     }
     printf("\n");
 }
 
-void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter) {
+void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter)
+{
     ESP_LOGI(TAG, "send packed struct payload");
     lora_payload_t payload;
     const size_t max_payload_size = 58; // E32-900T30D max payload size
-    if (sizeof(lora_payload_t) > max_payload_size) {
+    if (sizeof(lora_payload_t) > max_payload_size)
+    {
         ESP_LOGE(TAG, "ERROR: lora_payload_t size (%u bytes) exceeds LoRa E32 max payload size (%u bytes). Not sending!", (unsigned)sizeof(lora_payload_t), (unsigned)max_payload_size);
         return;
     }
@@ -601,21 +610,22 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
     payload.send_counter = send_counter;
     payload.checksum = lora_payload_checksum(&payload);
     ESP_LOGI(TAG, "Payload: time %s, ms %lu, pulses %lu, send_counter %lu, checksum 0x%04X",
-        payload.elapsed_time_str,
-        (unsigned long)payload.elapsed_time_ms,
-        (unsigned long)payload.pulse_count,
-        (unsigned long)payload.send_counter,
-        payload.checksum);
+             payload.elapsed_time_str,
+             (unsigned long)payload.elapsed_time_ms,
+             (unsigned long)payload.pulse_count,
+             (unsigned long)payload.send_counter,
+             payload.checksum);
     printf("[DEBUG] Send counter: %lu\n", (unsigned long)payload.send_counter);
     printf("[DEBUG] Checksum: 0x%04X\n", payload.checksum);
     ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
 }
 
-void receive_lora_message() {
-    // Wait for reply up to 5 seconds, polling every 200ms
-    #define LORA_RX_BUFFER_SIZE 128
-    #define LORA_REPLY_TIMEOUT_MS 5000
-    #define LORA_RECEIVE_POLL_MS 200
+void receive_lora_message()
+{
+// Wait for reply up to 5 seconds, polling every 200ms
+#define LORA_RX_BUFFER_SIZE 128
+#define LORA_REPLY_TIMEOUT_MS 5000
+#define LORA_RECEIVE_POLL_MS 200
     uint8_t rx_buffer[LORA_RX_BUFFER_SIZE];
     size_t total_received = 0;
     uint32_t waited_ms = 0;
@@ -623,46 +633,59 @@ void receive_lora_message() {
     bool got_terminator = false;
     vTaskDelay(pdMS_TO_TICKS(2000));
     ESP_LOGI(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
-    while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE) {
+    while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE)
+    {
         size_t received = 0;
         err = e32_receive_data(rx_buffer + total_received, LORA_RX_BUFFER_SIZE - total_received, &received);
-        if (err == ESP_OK && received > 0) {
+        if (err == ESP_OK && received > 0)
+        {
             // Check for terminator in newly received data
-            for (size_t i = 0; i < received; i++) {
-                if (rx_buffer[total_received + i] == '!') {
+            for (size_t i = 0; i < received; i++)
+            {
+                if (rx_buffer[total_received + i] == '!')
+                {
                     got_terminator = true;
                     total_received += i + 1; // include the terminator
                     break;
                 }
             }
-            if (!got_terminator) {
+            if (!got_terminator)
+            {
                 total_received += received;
             }
         }
-        if (!got_terminator) {
+        if (!got_terminator)
+        {
             vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_POLL_MS));
             waited_ms += LORA_RECEIVE_POLL_MS;
         }
     }
-    if (got_terminator) {
+    if (got_terminator)
+    {
         printf("Received message: ");
-        for (size_t i = 0; i < total_received; i++) {
+        for (size_t i = 0; i < total_received; i++)
+        {
             printf("%c", rx_buffer[i]);
         }
         printf("\n");
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
         test_for_garbage_bytes(rx_buffer, total_received);
-    } else if (total_received > 0) {
+    }
+    else if (total_received > 0)
+    {
         printf("Partial message received (no terminator): ");
-        for (size_t i = 0; i < total_received; i++) {
+        for (size_t i = 0; i < total_received; i++)
+        {
             printf("%c", rx_buffer[i]);
         }
         printf("\n");
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
         test_for_garbage_bytes(rx_buffer, total_received);
-    } else {
+    }
+    else
+    {
         printf("No reply received within timeout\n");
     }
 }
