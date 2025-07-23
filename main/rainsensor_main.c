@@ -47,6 +47,7 @@ RainSensor
   20250721  V0.9.8          Send number of pulses in message
   20250721  V0.9.9          Send a packed struct with pulse count and timers
   20250721  V0.9.10         BlinkTask duration reduced to 3 seconds, debug output for send counter and checksum, struct size check before LoRa send, checksum bug fix prompt for receiver
+  20250722  V0.9.11         Test without interrupt
   */
 
 #include <stdio.h>
@@ -83,7 +84,7 @@ RainSensor
 // LED and ULP parameters
 #define BLINK_GPIO CONFIG_BLINK_GPIO // GPIO for addressable LED strip
 #define ulp_wakeup_period 1000       // ULP wakeup period in ms
-static const double wakeup_interval_seconds = 20; // Time to wake CPU if at least one input pulse detected
+static const double wakeup_interval_seconds = 60; // Time to wake CPU if at least one input pulse detected
 #define RTC_SLOW_CLK_FREQ 136000     // RTC slow clock frequency (internal 136 kHz oscillator)
 // #define RTC_SLOW_CLK_FREQ 68359   // RTC slow clock frequency (17.5 MHz oscillator / 256)
 #define TASK_DONE_BIT (1 << 0)       // Bitmask for event group
@@ -116,7 +117,7 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
 void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.10"
+#define RAINSENSOR_VERSION "V0.9.11"
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -186,7 +187,7 @@ void app_main(void)
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-    setup_ulp_interrupt();
+    //TODO reactivate Test setup_ulp_interrupt();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {

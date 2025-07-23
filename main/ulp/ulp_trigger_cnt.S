@@ -175,16 +175,23 @@ edge_detected:
 	ld r2, r3, 0
 	add r2, r2, 1
 	st r2, r3, 0
-	/* Compare edge_count to edge_count_to_wake_up */
+	/* Compare edge_count to edge_count_to_wake_up , use "le" because there may be more edges 
+	e.g. when trigger events happen during SOC running*/
 	move r3, edge_count_to_wake_up
 	ld r3, r3, 0
-	sub r3, r3, r2
-	jump wake_up, eq
+	sub r0, r2, r3  // r0 = edge_count - edge_count_to_wake_up
+	//if edge_count < edge_count_to_wake_up we get a negative result
+	jump count_not_reached, ov //if edge_count < edge_count_to_wake_up jump to 
+	jump end_and_wake_CPU //if edge_count >= edge_count_to_wake_up jump to end_and_wake_CPU
+
+count_not_reached:
 	/* change value in test_div to check if we are in the right place */
 	move r0, test_div
-	ld r1, r0, 0
-	add r2, r1, 1
+	//ld r1, r0, 0
+	//add r2, r1, 1
 	st r2, r0, 0
+
+	//jumpr end_and_wake_CPU, 0, gt
 
 	/* Not yet. End program */
 	jump handle_timer
