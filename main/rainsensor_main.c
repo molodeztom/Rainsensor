@@ -108,7 +108,6 @@ static void configure_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
 
-
 static void BlinkTask(void *arg);
 
 static uint32_t calculate_time_ms(uint64_t ticks);
@@ -119,12 +118,9 @@ static void send_lora_message(uint32_t pulse_count, int hours, int minutes, int 
 static void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.13"
+#define RAINSENSOR_VERSION "V0.9.14"
 
 static led_strip_handle_t led_strip;
-
-
-
 
 void app_main(void)
 {
@@ -132,7 +128,7 @@ void app_main(void)
      *  re-connect to the USB port. We wait 1 sec here to allow for it to make the reconnection
      *  before we print anything. Otherwise the chip will go back to sleep again before the user
      *  has time to monitor any output.
-     */ 
+     */
     uint32_t ms = 0;
     int hours = 0, minutes = 0, seconds = 0;
     TaskHandle_t xBlinkTask = NULL;
@@ -152,8 +148,8 @@ void app_main(void)
     init_io();                // initialize IO pins
     e32_init_config(&config); // initialize E32 configuration structure
     ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
 
- 
     config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
     config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
     config.OPTION.fec = FEC_ENABLE;
@@ -168,7 +164,7 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to create event group");
         return;
     }
-    int send_counter = 1;
+    //int send_counter = 1;
     uint32_t pulse_count = 0;
 
     /* Initialize NVS */
@@ -178,7 +174,7 @@ void app_main(void)
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-   
+
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
@@ -199,24 +195,21 @@ void app_main(void)
         // After update_timer_count(), ms/hours/minutes/seconds are set
         ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
         format_time(ms, &hours, &minutes, &seconds);
+        xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
+        xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
+
+        // Use ulp_timer_count as send_counter since timer_count is undeclared
+        send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
+        receive_lora_message();
     }
 
-    ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
-
-    xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
-    xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
-
-
-    // Use ulp_timer_count as send_counter since timer_count is undeclared
-    send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
-    receive_lora_message();
     // ... process answer or timeout ...
     // Optional: sleep before next cycle
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    vTaskDelay(pdMS_TO_TICKS(4000));
 
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
- 
+
     esp_deep_sleep_start();
 }
 
@@ -419,7 +412,6 @@ static uint16_t calculate_increments_for_interval(double interval_seconds)
 
 static volatile bool send_lora_on_ulp = false;
 
-
 static void BlinkTask(void *arg)
 {
     // Blink for 3 seconds (3 cycles of 1s)
@@ -440,8 +432,6 @@ static void BlinkTask(void *arg)
     ESP_LOGI(TAG, "BlinkTask finished, deleting task");
     vTaskDelete(NULL);
 }
-
-
 
 static void configure_led(void)
 {
