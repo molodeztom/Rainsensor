@@ -99,29 +99,29 @@ EventGroupHandle_t blink_event_group;
 #define TASK_DONE_BIT (1 << 0) // Bitmask for the event group
 
 // forward declarations
-void print_buffer_hex(const uint8_t *buf, size_t len);
-void test_for_garbage_bytes(const uint8_t *buf, size_t len);
+static void print_buffer_hex(const uint8_t *buf, size_t len);
+static void test_for_garbage_bytes(const uint8_t *buf, size_t len);
 static void init_ulp_program(void);
 static void update_timer_count(void);
 static void configure_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
 
-void ulp_task(void *arg);
-void BlinkTask(void *arg);
+static void ulp_task(void *arg);
+static void BlinkTask(void *arg);
 
-uint32_t calculate_time_ms(uint64_t ticks);
-uint64_t calculate_ticks_from_seconds(double seconds);
-uint16_t calculate_increments_for_interval(double interval_seconds);
-void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
-void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter);
-void receive_lora_message(void);
+static uint32_t calculate_time_ms(uint64_t ticks);
+static uint64_t calculate_ticks_from_seconds(double seconds);
+static uint16_t calculate_increments_for_interval(double interval_seconds);
+static void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
+static void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter);
+static void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
 #define RAINSENSOR_VERSION "V0.9.13"
 
 static led_strip_handle_t led_strip;
-static TaskHandle_t ulp_task_handle = NULL;
+//static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
 
@@ -390,21 +390,21 @@ static void update_timer_count(void)
 }
 
 // Function to calculate the elapsed time in milliseconds
-uint32_t calculate_time_ms(uint64_t ticks)
+static uint32_t calculate_time_ms(uint64_t ticks)
 {
     // Each tick corresponds to approximately 6.67 microseconds, so we use the formula to convert ticks to milliseconds.
     // Calculation in milliseconds: (Ticks / RTC_SLOW_CLK_FREQ) * 1000
     return (uint32_t)((ticks * 1000) / RTC_SLOW_CLK_FREQ); // Ticks -> milliseconds
 }
 
-uint64_t calculate_ticks_from_seconds(double seconds)
+static uint64_t calculate_ticks_from_seconds(double seconds)
 {
     // Convert seconds to ticks using the formula: Ticks = seconds * RTC_SLOW_CLK_FREQ
     return (uint64_t)(seconds * RTC_SLOW_CLK_FREQ);
 }
 
 // Function to convert milliseconds into hours, minutes, and seconds
-void format_time(uint32_t ms, int *hours, int *minutes, int *seconds)
+static void format_time(uint32_t ms, int *hours, int *minutes, int *seconds)
 {
     *hours = ms / 3600000;             // Calculate hours (ms / 3600000)
     *minutes = (ms % 3600000) / 60000; // Calculate minutes ((ms % 3600000) / 60000)
@@ -412,7 +412,7 @@ void format_time(uint32_t ms, int *hours, int *minutes, int *seconds)
 }
 
 // Function to calculate the number of timer_count_low_h increments for a given interval
-uint16_t calculate_increments_for_interval(double interval_seconds)
+static uint16_t calculate_increments_for_interval(double interval_seconds)
 {
     // Each timer_count_low_h increment corresponds to 65536 / 136000 ≈ 0.482 seconds
     double increments = interval_seconds / (65536.0 / RTC_SLOW_CLK_FREQ);
@@ -470,7 +470,7 @@ void ulp_task(void *arg)
     }
 }
 
-void BlinkTask(void *arg)
+static void BlinkTask(void *arg)
 {
     // Blink for 3 seconds (3 cycles of 1s)
     for (int i = 0; i < 3; i++)
@@ -527,7 +527,7 @@ static void reset_counter(void)
 // Optional: Test function to check for garbage bytes in received buffer
 static int garbage_error_counter = 0;
 static int message_counter = 0;
-void test_for_garbage_bytes(const uint8_t *buf, size_t len)
+static void test_for_garbage_bytes(const uint8_t *buf, size_t len)
 {
     // Garbage: any non-printable ASCII before first printable char
     size_t i = 0;
@@ -554,7 +554,7 @@ void test_for_garbage_bytes(const uint8_t *buf, size_t len)
     }
 }
 
-void print_buffer_hex(const uint8_t *buf, size_t len)
+static void print_buffer_hex(const uint8_t *buf, size_t len)
 {
     printf("[HEX]: ");
     for (size_t i = 0; i < len; i++)
@@ -590,7 +590,7 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
     ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
 }
 
-void receive_lora_message()
+static void receive_lora_message()
 {
 // Wait for reply up to 5 seconds, polling every 200ms
 #define LORA_RX_BUFFER_SIZE 128
