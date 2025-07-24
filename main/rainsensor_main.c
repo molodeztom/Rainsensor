@@ -50,7 +50,8 @@ RainSensor
   20250722  V0.9.11         Test without interrupt
   20250723  V0.9.12         Test with interrupt worked, all functions not needed outcommented
   20250724  V0.9.13         Code cleanup interrupt functions removed
-  20240724  V0.9.14         Code cleanup, removed unused interrupt counter, optimize functions called only if ulp wakeup
+  20250724  V0.9.14         Code cleanup, removed unused interrupt counter, optimize functions called only if ulp wakeup
+  20250724  V0.9.15         Message if Rainsensor initialized
   */
 
 #include <stdio.h>
@@ -118,7 +119,7 @@ static void send_lora_message(uint32_t pulse_count, int hours, int minutes, int 
 static void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.14"
+#define RAINSENSOR_VERSION "V0.9.15"
 
 static led_strip_handle_t led_strip;
 
@@ -164,7 +165,7 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to create event group");
         return;
     }
-    //int send_counter = 1;
+    // int send_counter = 1;
     uint32_t pulse_count = 0;
 
     /* Initialize NVS */
@@ -180,6 +181,19 @@ void app_main(void)
     {
         printf("Not ULP wakeup, initializing ULP\n");
         init_ulp_program();
+      //TODO: change use lora_send_message (add an event code to  struct first)
+        const char *message = "Rainsensor initialized";
+        size_t message_length = strlen(message) + 1; // Include null terminator
+        esp_err_t result = e32_send_data((uint8_t *)message, message_length);
+        // Check if the transmission was successful
+        if (result == ESP_OK)
+        {
+            ESP_LOGI("Rainsensor", "Initialization message sent successfully.");
+        }
+        else
+        {
+            ESP_LOGE("Rainsensor", "Failed to send initialization message: %s", esp_err_to_name(result));
+        }
     }
     else
     {
