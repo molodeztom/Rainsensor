@@ -118,7 +118,7 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
 void receive_lora_message(void);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.11"
+#define RAINSENSOR_VERSION "V0.9.13"
 
 static led_strip_handle_t led_strip;
 static TaskHandle_t ulp_task_handle = NULL;
@@ -147,12 +147,12 @@ void app_main(void)
     e32_config_t config; // E32 configuration structure
     uint8_t rx_buffer[128];
     size_t received = 0;
-    func();                   // Call the function to print the message
+    void initLibrary();
     init_io();                // initialize IO pins
     e32_init_config(&config); // initialize E32 configuration structure
     ESP_ERROR_CHECK(nvs_flash_init());
 
-    ESP_LOGI("rainsens", "rainsensor V0.8.1 started");
+ 
     config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
     config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
     config.OPTION.fec = FEC_ENABLE;
