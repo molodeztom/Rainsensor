@@ -50,6 +50,7 @@ RainSensor
   20250722  V0.9.11         Test without interrupt
   20250723  V0.9.12         Test with interrupt worked, all functions not needed outcommented
   20250724  V0.9.13         Code cleanup interrupt functions removed
+  20240724  V0.9.14         Code cleanup, removed unused interrupt counter, optimize functions called only if ulp wakeup
   */
 
 #include <stdio.h>
@@ -121,9 +122,7 @@ static const char *TAG = "rainsens";
 #define RAINSENSOR_VERSION "V0.9.13"
 
 static led_strip_handle_t led_strip;
-//static TaskHandle_t ulp_task_handle = NULL;
 
-static uint32_t interrupt_count = 0;
 
 
 
@@ -133,7 +132,9 @@ void app_main(void)
      *  re-connect to the USB port. We wait 1 sec here to allow for it to make the reconnection
      *  before we print anything. Otherwise the chip will go back to sleep again before the user
      *  has time to monitor any output.
-     */
+     */ 
+    uint32_t ms = 0;
+    int hours = 0, minutes = 0, seconds = 0;
     TaskHandle_t xBlinkTask = NULL;
     vTaskDelay(pdMS_TO_TICKS(1000));
     /*     esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
@@ -174,12 +175,10 @@ void app_main(void)
 
     /* Configure the peripheral according to the LED type */
     configure_led();
-    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-
     led_strip_set_pixel(led_strip, 0, 0, 200, 0);
     /* Refresh the strip to send data */
     led_strip_refresh(led_strip);
-    // TODO reactivate Test setup_ulp_interrupt();
+   
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
@@ -196,6 +195,10 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_open("pulsecnt", NVS_READONLY, &handle));
         ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
         nvs_close(handle);
+        // Calculate elapsed time for payload
+        // After update_timer_count(), ms/hours/minutes/seconds are set
+        ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
+        format_time(ms, &hours, &minutes, &seconds);
     }
 
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
@@ -203,17 +206,6 @@ void app_main(void)
     xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
     xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
 
-    // Calculate elapsed time for payload
-    uint32_t ms = 0;
-    int hours = 0, minutes = 0, seconds = 0;
-    // If ULP wakeup, get elapsed time from ULP
-    if (cause == ESP_SLEEP_WAKEUP_ULP)
-    {
-        // ...existing code...
-        // After update_timer_count(), ms/hours/minutes/seconds are set
-        ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
-        format_time(ms, &hours, &minutes, &seconds);
-    }
 
     // Use ulp_timer_count as send_counter since timer_count is undeclared
     send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
@@ -222,12 +214,9 @@ void app_main(void)
     // Optional: sleep before next cycle
     vTaskDelay(pdMS_TO_TICKS(3000));
 
-    // wait some time to get a chance to call interrupt from usp instead of wakeup
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
     printf("Entering deep sleep\n\n");
     led_strip_clear(led_strip);
-    // reset_counter();//TODO remove
+ 
     esp_deep_sleep_start();
 }
 
