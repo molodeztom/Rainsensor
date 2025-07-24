@@ -107,7 +107,7 @@ static void configure_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
 
-static void ulp_task(void *arg);
+
 static void BlinkTask(void *arg);
 
 static uint32_t calculate_time_ms(uint64_t ticks);
@@ -430,45 +430,6 @@ static uint16_t calculate_increments_for_interval(double interval_seconds)
 
 static volatile bool send_lora_on_ulp = false;
 
-
-void ulp_task(void *arg)
-{
-    while (1)
-    {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); // Warte auf Benachrichtigung
-        printf("Task notified \n");
-        size_t freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-        printf("Free Memory: %d bytes\n", freeMemory);
-        // Überprüfe den Stack-Verbrauch
-        UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
-        printf("Stack High Water Mark: %d\n", highWaterMark);
-        //signal_from_ulp(); // Führe die spezifische Funktion aus
-        if (send_lora_on_ulp)
-        {
-            // Get latest pulse count from NVS
-            nvs_handle_t handle;
-            uint32_t pulse_count = 0;
-            ESP_ERROR_CHECK(nvs_open("pulsecnt", NVS_READONLY, &handle));
-            ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
-            nvs_close(handle);
-            // Get time from ULP
-            uint32_t ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
-            int hours = 0, minutes = 0, seconds = 0;
-            format_time(ms, &hours, &minutes, &seconds);
-            send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
-            send_lora_on_ulp = false;
-        }
-        led_strip_set_pixel(led_strip, 0, 0, 0, 200);
-        /* Refresh the strip to send data */
-        led_strip_refresh(led_strip); // Überprüfe den freien Speicher
-
-        freeMemory = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-        printf("Free Memory: %d bytes\n", freeMemory);
-        // Überprüfe den Stack-Verbrauch
-        highWaterMark = uxTaskGetStackHighWaterMark(NULL);
-        printf("Stack High Water Mark: %d\n", highWaterMark);
-    }
-}
 
 static void BlinkTask(void *arg)
 {
