@@ -49,6 +49,7 @@ RainSensor
   20250721  V0.9.10         BlinkTask duration reduced to 3 seconds, debug output for send counter and checksum, struct size check before LoRa send, checksum bug fix prompt for receiver
   20250722  V0.9.11         Test without interrupt
   20250723  V0.9.12         Test with interrupt worked, all functions not needed outcommented
+  20250724  V0.9.13         Code cleanup interrupt functions removed
   */
 
 #include <stdio.h>
@@ -105,11 +106,10 @@ static void update_timer_count(void);
 static void configure_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
-//static void IRAM_ATTR ulp_isr_handler(void *arg);
-//void signal_from_ulp();
+
 void ulp_task(void *arg);
 void BlinkTask(void *arg);
-//void setup_ulp_interrupt();
+
 uint32_t calculate_time_ms(uint64_t ticks);
 uint64_t calculate_ticks_from_seconds(double seconds);
 uint16_t calculate_increments_for_interval(double interval_seconds);
@@ -125,16 +125,7 @@ static TaskHandle_t ulp_task_handle = NULL;
 
 static uint32_t interrupt_count = 0;
 
-/* static void IRAM_ATTR ulp_isr_handler(void *arg)
-{
-    SET_PERI_REG_MASK(RTC_CNTL_INT_CLR_REG, RTC_CNTL_ULP_CP_INT_CLR_M);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xTaskNotifyFromISR(ulp_task_handle, 0, eNoAction, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken)
-    {
-        portYIELD_FROM_ISR();
-    }
-} */
+
 
 void app_main(void)
 {
@@ -439,15 +430,7 @@ uint16_t calculate_increments_for_interval(double interval_seconds)
 
 static volatile bool send_lora_on_ulp = false;
 
-/* void signal_from_ulp()
-{
-    ESP_LOGI(TAG, "ULP triggered an interrupt! Calling specific function...");
-    interrupt_count++;
-    printf("Interrupt Counter %5" PRIu32 "\n", interrupt_count);
-    update_pulse_count();
-    send_lora_on_ulp = true; // Set flag to send LoRa message in task
-}
- */
+
 void ulp_task(void *arg)
 {
     while (1)
@@ -508,20 +491,7 @@ void BlinkTask(void *arg)
     vTaskDelete(NULL);
 }
 
-/* void setup_ulp_interrupt()
-{
-    esp_err_t err = rtc_isr_register(ulp_isr_handler, NULL, RTC_CNTL_ULP_CP_INT_ENA_M, ESP_INTR_FLAG_IRAM);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to register ULP interrupt handler: %s", esp_err_to_name(err));
-        return;
-    }
-    ESP_LOGI(TAG, "Create ulp_task");
-    xTaskCreate(ulp_task, "ulp_task", 4096, NULL, 5, &ulp_task_handle);
-    // ULP-Interrupt aktivieren, required!
-    SET_PERI_REG_MASK(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
-    ESP_LOGI(TAG, "ULP interrupt enabled");
-} */
+
 
 static void configure_led(void)
 {
