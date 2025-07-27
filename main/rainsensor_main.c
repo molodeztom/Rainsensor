@@ -52,6 +52,8 @@ RainSensor
   20250724  V0.9.13         Code cleanup interrupt functions removed
   20250724  V0.9.14         Code cleanup, removed unused interrupt counter, optimize functions called only if ulp wakeup
   20250724  V0.9.15         Message if Rainsensor initialized
+  20250727  V0.9.16         New send structure with messageID and eventID, no time string anymore
+  20250727  V0.9.17         Use NVS to store messageID, increment and store messageID in NVS
   */
 
 #include <stdio.h>
@@ -74,7 +76,7 @@ RainSensor
 #include "driver/rtc_cntl.h"
 #include "esp_log.h"
 #include "E32_Lora_Lib.h"
-#include "communication.h"
+#include "../include/communication.h"
 
 // =====================
 // Application Parameters
@@ -92,6 +94,8 @@ static const double wakeup_interval_seconds = 60; // Time to wake CPU if at leas
 #define RTC_SLOW_CLK_FREQ 136000                  // RTC slow clock frequency (internal 136 kHz oscillator)
 // #define RTC_SLOW_CLK_FREQ 68359   // RTC slow clock frequency (17.5 MHz oscillator / 256)
 #define TASK_DONE_BIT (1 << 0) // Bitmask for event group
+static const char *nvs_namespace = "pulsecnt";
+
 
 // external references
 extern const uint8_t ulp_main_bin_start[] asm("_binary_ulp_main_bin_start");
@@ -108,18 +112,18 @@ static void update_timer_count(void);
 static void configure_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
-
 static void BlinkTask(void *arg);
-
 static uint32_t calculate_time_ms(uint64_t ticks);
 static uint64_t calculate_ticks_from_seconds(double seconds);
 static uint16_t calculate_increments_for_interval(double interval_seconds);
 static void format_time(uint32_t ms, int *hours, int *minutes, int *seconds);
 static void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter);
 static void receive_lora_message(void);
+static uint16_t read_messageId_fromNVS();
+static void increment_and_store_messageId(uint16_t *messageId);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.15"
+#define RAINSENSOR_VERSION "V0.9.17"
 
 static led_strip_handle_t led_strip;
 
@@ -132,11 +136,12 @@ void app_main(void)
      */
     uint32_t ms = 0;
     int hours = 0, minutes = 0, seconds = 0;
+    static uint16_t msg_id = 0; // Message ID for LoRa messages
     TaskHandle_t xBlinkTask = NULL;
     vTaskDelay(pdMS_TO_TICKS(1000));
     /*     esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
-        esp_log_level_set("E32-900T30D", ESP_LOG_INFO);
-        esp_log_level_set("rainsens", ESP_LOG_INFO); */
+        esp_log_level_set("E32-900T30D", ESP_LOG_INFO); */
+        esp_log_level_set("rainsens", ESP_LOG_INFO); 
     printf("rainsensor %s\n\n", RAINSENSOR_VERSION);
     printf("Firmware Version: %s\n", APP_VERSION);
     printf("E32_Lora_Lib version: %s\n", e32_lora_lib_get_version());
@@ -181,7 +186,7 @@ void app_main(void)
     {
         printf("Not ULP wakeup, initializing ULP\n");
         init_ulp_program();
-      //TODO: change use lora_send_message (add an event code to  struct first)
+        // TODO: change use lora_send_message (add an event code to  struct first)
         const char *message = "Rainsensor initialized";
         size_t message_length = strlen(message) + 1; // Include null terminator
         esp_err_t result = e32_send_data((uint8_t *)message, message_length);
@@ -202,7 +207,7 @@ void app_main(void)
         update_pulse_count();
         // Read updated pulse_count from NVS
         nvs_handle_t handle;
-        ESP_ERROR_CHECK(nvs_open("pulsecnt", NVS_READONLY, &handle));
+        ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READONLY, &handle));
         ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
         nvs_close(handle);
         // Calculate elapsed time for payload
@@ -304,7 +309,7 @@ static void init_ulp_program(void)
 
 static void update_pulse_count(void)
 {
-    const char *nvs_namespace = "pulsecnt";
+
     const char *count_key = "count";
 
     nvs_handle_t handle;
@@ -335,7 +340,7 @@ static void update_pulse_count(void)
 
 static void update_timer_count(void)
 {
-    const char *nvs_namespace = "pulsecnt";
+    //const char *nvs_namespace = "pulsecnt";
     const char *count_key = "pulse";
 
     nvs_handle_t handle;
@@ -466,7 +471,7 @@ static void configure_led(void)
 
 static void reset_counter(void)
 {
-    const char *nvs_namespace = "pulsecnt";
+    //const char *nvs_namespace = "pulsecnt";
     const char *count_key = "count";
 
     nvs_handle_t handle;
@@ -521,6 +526,16 @@ static void print_buffer_hex(const uint8_t *buf, size_t len)
 void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter)
 {
     ESP_LOGI(TAG, "send packed struct payload");
+    /* message structure
+    uint16_t messageID;          // Message ID
+    uint16_t lora_eventID;      // Event ID see below
+    uint32_t elapsed_time_ms;      // Elapsed time in ms
+    uint32_t pulse_count;          // Number of pulses
+    uint16_t checksum;             // Checksum (sum of all bytes except checksum field)
+    */
+    char elapsed_time_str[9];
+    uint16_t messageID = 0;
+    messageID = read_messageId_fromNVS();
     lora_payload_t payload;
     const size_t max_payload_size = 58; // E32-900T30D max payload size
     if (sizeof(lora_payload_t) > max_payload_size)
@@ -528,18 +543,23 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
         ESP_LOGE(TAG, "ERROR: lora_payload_t size (%u bytes) exceeds LoRa E32 max payload size (%u bytes). Not sending!", (unsigned)sizeof(lora_payload_t), (unsigned)max_payload_size);
         return;
     }
-    snprintf(payload.elapsed_time_str, sizeof(payload.elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
+    snprintf(elapsed_time_str, sizeof(elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
+    printf("messageID before increment: %u", messageID);
+    payload.messageID = messageID; // Use messageID from NVS
+    increment_and_store_messageId(&messageID); // Increment and store new messageID in NVS
+    printf("messageID after increment: %u", messageID);
+    payload.lora_eventID = 0x0001; // Example event ID, change as needed
     payload.elapsed_time_ms = elapsed_ms;
     payload.pulse_count = pulse_count;
-    payload.send_counter = send_counter;
     payload.checksum = lora_payload_checksum(&payload);
-    ESP_LOGI(TAG, "Payload: time %s, ms %lu, pulses %lu, send_counter %lu, checksum 0x%04X",
-             payload.elapsed_time_str,
+
+    ESP_LOGI(TAG, "Payload: time %s, ms %lu, pulses %lu, messageID %lu, checksum 0x%04X",
+             elapsed_time_str,
              (unsigned long)payload.elapsed_time_ms,
              (unsigned long)payload.pulse_count,
-             (unsigned long)payload.send_counter,
+             (unsigned long)payload.messageID,
              payload.checksum);
-    printf("[DEBUG] Send counter: %lu\n", (unsigned long)payload.send_counter);
+    printf("[DEBUG] Send counter: %lu\n", (unsigned long)payload.messageID);
     printf("[DEBUG] Checksum: 0x%04X\n", payload.checksum);
     ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
 }
@@ -612,4 +632,46 @@ static void receive_lora_message()
     {
         printf("No reply received within timeout\n");
     }
+}
+
+uint16_t read_messageId_fromNVS()
+{
+    ESP_LOGI(TAG, "Reading messageID from NVS");
+    nvs_handle_t handle;
+    uint16_t messageId = 0; // default 0 on first run
+    esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
+    if (err == ESP_OK)
+    {
+        err = nvs_get_u16(handle, "messageID", &messageId);
+        if (err == ESP_ERR_NVS_NOT_FOUND)
+        {
+            messageId = 0; // not found, start at 0
+            printf("No messageID found in NVS, starting at 0\n");
+        }
+        else if (err != ESP_OK)
+        {
+            printf("Error reading messageID from NVS: %s\n", esp_err_to_name(err));
+            // handle error (log etc)
+        }
+        nvs_close(handle);
+    }
+    else
+    {
+        printf("Error opening NVS: %s\n", esp_err_to_name(err));
+        // handle error opening NVS
+    }
+    return messageId;
+}
+
+void increment_and_store_messageId(uint16_t *messageID)
+{
+    ESP_LOGI(TAG, "Incrementing and storing messageID in NVS %u", *messageID);
+    *messageID = *messageID + 1; // Increment messageID
+
+    printf("New messageID: %u\n", *messageID);
+    nvs_handle_t handle;
+    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    ESP_ERROR_CHECK(nvs_set_u16(handle, "messageID", *messageID));
+    ESP_ERROR_CHECK(nvs_commit(handle));
+    nvs_close(handle);
 }

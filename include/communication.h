@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 // 20250721  V0.9.10         BlinkTask duration reduced to 3 seconds, debug output for send counter and checksum, struct size check before LoRa send, checksum bug fix prompt for receiver
-
+// 20250727  V0.9.11         New structure
 // LoRa communication payload struct
 // All fields packed, no padding
 // elapsed_time_str: formatted as "hh:mm:ss" (8 chars + null terminator)
@@ -14,7 +14,19 @@ typedef struct __attribute__((packed)) {
     uint32_t pulse_count;          // Number of pulses
     uint32_t send_counter;         // Message ID
     uint16_t checksum;             // Checksum (sum of all bytes except checksum field)
+} lora_payloadOLD_t;
+
+typedef struct __attribute__((packed)) {
+    uint16_t messageID;          // Message ID
+    uint16_t lora_eventID;      // Event ID see below
+    uint32_t elapsed_time_ms;      // Elapsed time in ms
+    uint32_t pulse_count;          // Number of pulses
+    uint16_t checksum;             // Checksum (sum of all bytes except checksum field)
 } lora_payload_t;
+
+/*
+Event IDs
+*/
 
 // Calculate checksum (simple sum of bytes, excluding checksum field)
 static inline uint16_t lora_payload_checksum(const lora_payload_t *payload) {
@@ -33,3 +45,4 @@ static inline uint16_t lora_payload_checksum(const lora_payload_t *payload) {
 // payload.checksum = lora_payload_checksum(&payload);
 // send as raw bytes: e32_send_data((uint8_t *)&payload, sizeof(payload));
 // On receiver: validate checksum before using data.
+
