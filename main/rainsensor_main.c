@@ -55,6 +55,7 @@ RainSensor
   20250727  V0.9.16         New send structure with messageID and eventID, no time string anymore
   20250727  V0.9.17         Use NVS to store messageID, increment and store messageID in NVS
   20250802  V0.9.18         Code cleanup, remove old debug info
+  20250803  V0.9.20         Improved error handling: added explicit error checks and recovery mechanisms
   */
 
 #include <stdio.h>
@@ -124,7 +125,7 @@ static uint16_t read_messageId_fromNVS();
 static void increment_and_store_messageId(uint16_t *messageId);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.18"
+#define RAINSENSOR_VERSION "V0.9.20"
 
 static led_strip_handle_t led_strip;
 
@@ -139,6 +140,7 @@ void app_main(void)
     int hours = 0, minutes = 0, seconds = 0;
     static uint16_t msg_id = 0; // Message ID for LoRa messages
     TaskHandle_t xBlinkTask = NULL;
+    esp_err_t led_err = ESP_OK; // Define led_err once at the beginning of the function
     vTaskDelay(pdMS_TO_TICKS(1000));
     
     // Configure log levels for all components
@@ -156,14 +158,26 @@ void app_main(void)
     size_t received = 0;
     initLibrary();
     e32_init_config(&config); // initialize E32 configuration structure
-    ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
+    esp_err_t err = nvs_flash_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize NVS flash: %s", esp_err_to_name(err));
+        // This is critical, so we should return
+        return;
+    }
+    
+    err = esp_sleep_enable_ulp_wakeup();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable ULP wakeup: %s", esp_err_to_name(err));
+        // This is critical, so we should return
+        return;
+    }
 
     config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
     config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
     config.OPTION.fec = FEC_ENABLE;
     config.CHAN = 0x06;         // set channel to 6 (902.875MHz)
     sendConfiguration(&config); // E32 configuration structure
+    // Note: sendConfiguration doesn't return an error code
 
     vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB)); // wait for command to be processed
 
@@ -180,9 +194,16 @@ void app_main(void)
 
     /* Configure the peripheral according to the LED type */
     configure_led();
-    led_strip_set_pixel(led_strip, 0, 0, 200, 0);
+    led_err = led_strip_set_pixel(led_strip, 0, 0, 200, 0);
+    if (led_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set LED pixel: %s", esp_err_to_name(led_err));
+    }
+    
     /* Refresh the strip to send data */
-    led_strip_refresh(led_strip);
+    led_err = led_strip_refresh(led_strip);
+    if (led_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
+    }
 
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
@@ -210,9 +231,18 @@ void app_main(void)
         update_pulse_count();
         // Read updated pulse_count from NVS
         nvs_handle_t handle;
-        ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READONLY, &handle));
-        ESP_ERROR_CHECK(nvs_get_u32(handle, "count", &pulse_count));
-        nvs_close(handle);
+        esp_err_t err = nvs_open(nvs_namespace, NVS_READONLY, &handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+            // Continue with pulse_count = 0 as fallback
+        } else {
+            err = nvs_get_u32(handle, "count", &pulse_count);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to read pulse count from NVS: %s", esp_err_to_name(err));
+                // Continue with pulse_count = 0 as fallback
+            }
+            nvs_close(handle);
+        }
         // Calculate elapsed time for payload
         // After update_timer_count(), ms/hours/minutes/seconds are set
         ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
@@ -230,7 +260,10 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(4000));
 
     ESP_LOGI(TAG, "Entering deep sleep");
-    led_strip_clear(led_strip);
+    led_err = led_strip_clear(led_strip);
+    if (led_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear LED strip: %s", esp_err_to_name(led_err));
+    }
 
     esp_deep_sleep_start();
 }
@@ -238,8 +271,11 @@ void app_main(void)
 static void init_ulp_program(void)
 {
     esp_err_t err = ulp_load_binary(0, ulp_main_bin_start,
-                                    (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t));
-    ESP_ERROR_CHECK(err);
+                                     (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load ULP binary: %s", esp_err_to_name(err));
+        return;
+    }
 
     /* GPIO used for pulse counting. */
     gpio_num_t gpio_num = GPIO_NUM_8;
@@ -307,7 +343,10 @@ static void init_ulp_program(void)
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
-    ESP_ERROR_CHECK(err);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start ULP program: %s", esp_err_to_name(err));
+        return;
+    }
 }
 
 static void update_pulse_count(void)
@@ -316,11 +355,25 @@ static void update_pulse_count(void)
     const char *count_key = "count";
 
     nvs_handle_t handle;
-    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        return;
+    }
+    
     uint32_t pulse_count = 0;
-    esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
-    assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    ESP_LOGI(TAG, "Read pulse count from NVS: %5" PRIu32, pulse_count);
+    err = nvs_get_u32(handle, count_key, &pulse_count);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Error reading pulse count from NVS: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return;
+    }
+    
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No pulse count found in NVS, starting at 0");
+    } else {
+        ESP_LOGI(TAG, "Read pulse count from NVS: %5" PRIu32, pulse_count);
+    }
 
     /* ULP program counts signal edges, convert that to the number of pulses */
     uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
@@ -330,10 +383,21 @@ static void update_pulse_count(void)
 
     /* Save the new pulse count to NVS */
     pulse_count += pulse_count_from_ulp;
-    ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
-    ESP_ERROR_CHECK(nvs_commit(handle));
+    err = nvs_set_u32(handle, count_key, pulse_count);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write pulse count to NVS: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return;
+    }
+    
+    err = nvs_commit(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit changes to NVS: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "Wrote updated pulse count to NVS: %5" PRIu32, pulse_count);
+    }
+    
     nvs_close(handle);
-    ESP_LOGI(TAG, "Wrote updated pulse count to NVS: %5" PRIu32, pulse_count);
 
     // Debug: Print ULP variables after update
     ESP_LOGD(TAG, "ULP edge_count (after wakeup): %d", (int)ulp_edge_count);
@@ -347,9 +411,17 @@ static void update_timer_count(void)
     const char *count_key = "pulse";
 
     nvs_handle_t handle;
-    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READONLY, &handle));
+    esp_err_t err = nvs_open(nvs_namespace, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        return;
+    }
+    
     uint32_t timer_count = 1;
-    esp_err_t err = nvs_get_u32(handle, count_key, &timer_count);
+    err = nvs_get_u32(handle, count_key, &timer_count);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Error reading timer count from NVS: %s", esp_err_to_name(err));
+    }
 
     nvs_close(handle);
     uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
@@ -439,18 +511,46 @@ static void BlinkTask(void *arg)
     // Blink for 3 seconds (3 cycles of 1s)
     for (int i = 0; i < 3; i++)
     {
-        led_strip_set_pixel(led_strip, 0, 230, 0, 0);
-        led_strip_refresh(led_strip);
+        esp_err_t led_err = led_strip_set_pixel(led_strip, 0, 230, 0, 0);
+        if (led_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set LED pixel (red): %s", esp_err_to_name(led_err));
+        }
+        
+        led_err = led_strip_refresh(led_strip);
+        if (led_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
+        }
+        
         vTaskDelay(pdMS_TO_TICKS(500));
-        led_strip_set_pixel(led_strip, 0, 0, 230, 0);
-        led_strip_refresh(led_strip);
+        
+        led_err = led_strip_set_pixel(led_strip, 0, 0, 230, 0);
+        if (led_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set LED pixel (green): %s", esp_err_to_name(led_err));
+        }
+        
+        led_err = led_strip_refresh(led_strip);
+        if (led_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
+        }
         vTaskDelay(pdMS_TO_TICKS(500));
     }
-    led_strip_set_pixel(led_strip, 0, 200, 200, 200);
-    led_strip_refresh(led_strip);
+    esp_err_t led_err = led_strip_set_pixel(led_strip, 0, 200, 200, 200);
+    if (led_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set LED pixel (white): %s", esp_err_to_name(led_err));
+    }
+    
+    led_err = led_strip_refresh(led_strip);
+    if (led_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
+    }
+    
     vTaskDelay(pdMS_TO_TICKS(500));
     xEventGroupSetBits(blink_event_group, TASK_DONE_BIT);
-    led_strip_clear(led_strip);
+    
+    led_err = led_strip_clear(led_strip);
+    if (led_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear LED strip: %s", esp_err_to_name(led_err));
+    }
     ESP_LOGI(TAG, "BlinkTask finished, deleting task");
     vTaskDelete(NULL);
 }
@@ -469,7 +569,11 @@ static void configure_led(void)
         .spi_bus = SPI2_HOST,
         .flags.with_dma = true,
     };
-    ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &led_strip));
+    esp_err_t err = led_strip_new_spi_device(&strip_config, &spi_config, &led_strip);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create LED strip device: %s", esp_err_to_name(err));
+        // Continue without LED functionality
+    }
 }
 
 static void reset_counter(void)
@@ -478,11 +582,27 @@ static void reset_counter(void)
     const char *count_key = "count";
 
     nvs_handle_t handle;
-    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
+    esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        return;
+    }
+    
     uint32_t pulse_count = 0;
     uint32_t timer_count = 0;
-    ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
-    ESP_ERROR_CHECK(nvs_commit(handle));
+    
+    err = nvs_set_u32(handle, count_key, pulse_count);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write pulse count to NVS: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return;
+    }
+    
+    err = nvs_commit(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit changes to NVS: %s", esp_err_to_name(err));
+    }
+    
     nvs_close(handle);
 }
 
@@ -566,7 +686,11 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
              payload.checksum);
    ESP_LOGD(TAG, "Send counter: %lu", (unsigned long)payload.messageID);
    ESP_LOGD(TAG, "Checksum: 0x%04X", payload.checksum);
-   ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
+   esp_err_t err = e32_send_data((uint8_t *)&payload, sizeof(payload));
+   if (err != ESP_OK) {
+       ESP_LOGE(TAG, "Failed to send LoRa message: %s", esp_err_to_name(err));
+       // Continue execution, as this is a non-critical error
+   }
 }
 
 static void receive_lora_message()
@@ -679,8 +803,23 @@ void increment_and_store_messageId(uint16_t *messageID)
 
     ESP_LOGI(TAG, "New messageID: %u", *messageID);
     nvs_handle_t handle;
-    ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
-    ESP_ERROR_CHECK(nvs_set_u16(handle, "messageID", *messageID));
-    ESP_ERROR_CHECK(nvs_commit(handle));
+    esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    err = nvs_set_u16(handle, "messageID", *messageID);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write messageID to NVS: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return;
+    }
+    
+    err = nvs_commit(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit changes to NVS: %s", esp_err_to_name(err));
+    }
+    
     nvs_close(handle);
 }
