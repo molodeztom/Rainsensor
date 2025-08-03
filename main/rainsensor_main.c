@@ -54,6 +54,7 @@ RainSensor
   20250724  V0.9.15         Message if Rainsensor initialized
   20250727  V0.9.16         New send structure with messageID and eventID, no time string anymore
   20250727  V0.9.17         Use NVS to store messageID, increment and store messageID in NVS
+  20250802  V0.9.18         Code cleanup, remove old debug info
   */
 
 #include <stdio.h>
@@ -123,7 +124,7 @@ static uint16_t read_messageId_fromNVS();
 static void increment_and_store_messageId(uint16_t *messageId);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.17"
+#define RAINSENSOR_VERSION "V0.9.18"
 
 static led_strip_handle_t led_strip;
 
@@ -150,8 +151,7 @@ void app_main(void)
     e32_config_t config; // E32 configuration structure
     uint8_t rx_buffer[128];
     size_t received = 0;
-    void initLibrary();
-    init_io();                // initialize IO pins
+    initLibrary();
     e32_init_config(&config); // initialize E32 configuration structure
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_sleep_enable_ulp_wakeup());
