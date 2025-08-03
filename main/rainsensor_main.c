@@ -61,6 +61,7 @@ RainSensor
   20250803  V0.9.23         Remove unused debug calculations when in release mode
   20250803  V0.9.24         Add Kconfig option to enable/disable debug output, move main receive lora messsage functionality to E32_Lora_Lib
   20250803  V0.9.25         Add version number to E32_Lora_Lib.h and E32_Lora_Lib.c, use it in initLibrary
+  20240803  V0.9.26         remove unused variables, use e32_lora_lib_get_version() to get version number, replace deprecated "driver/rtc_cntl.h"
   */
 
 /*
@@ -88,8 +89,13 @@ When disabled, the detailed debug output in the update_timer_count function will
 #include "led_strip.h"
 // #include "esp_intr_alloc.h"
 #include "driver/gpio.h"
-#include "driver/rtc_io.h"
-#include "driver/rtc_cntl.h"
+
+/* Old deprecated include - kept for reference */
+// #include "driver/rtc_cntl.h"
+
+/* New recommended includes for ESP-IDF v5.4.1+ */
+#include "esp_sleep.h"      // For sleep-related functions
+#include "driver/rtc_io.h"  // For RTC GPIO functions
 #include "esp_log.h"
 #include "E32_Lora_Lib.h"
 #include "../include/communication.h"
@@ -186,7 +192,7 @@ static const char *TAG = "rainsens";
 #ifdef APP_VERSION_NUMBER
 #define RAINSENSOR_VERSION "V " APP_VERSION_NUMBER
 #else
-#define RAINSENSOR_VERSION "V0.9.24"
+#define RAINSENSOR_VERSION "V0.9.26"
 #endif
 
 static led_strip_handle_t led_strip;
