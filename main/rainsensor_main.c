@@ -210,10 +210,10 @@ void app_main(void)
     esp_log_level_set(TAG, ESP_LOG_DEBUG);           // Level for this component
     esp_log_level_set("E32-900T30D", ESP_LOG_DEBUG); // Level for LoRa library
 
-    ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
-    ESP_LOGI(TAG, "Firmware Version: %s", APP_VERSION);
+   // ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
+    ESP_LOGI(TAG, "Rainsensor Firmware Version: %s", APP_VERSION);
     ESP_LOGI(TAG, "E32_Lora_Lib version: %s", e32_lora_lib_get_version());
-    ESP_LOGI(TAG, "E32_Lora_Lib git version: %s", E32_LORA_LIB_GIT_VERSION);
+    //ESP_LOGI(TAG, "E32_Lora_Lib git version: %s", E32_LORA_LIB_GIT_VERSION);
 
     e32_config_t config; // E32 configuration structure
     uint8_t rx_buffer[128];
