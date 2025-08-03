@@ -184,7 +184,7 @@ static const char *TAG = "rainsens";
 
 // Use the version number extracted from Git tags if available, otherwise use a default
 #ifdef APP_VERSION_NUMBER
-#define RAINSENSOR_VERSION "V" APP_VERSION_NUMBER
+#define RAINSENSOR_VERSION "V " APP_VERSION_NUMBER
 #else
 #define RAINSENSOR_VERSION "V0.9.24"
 #endif
