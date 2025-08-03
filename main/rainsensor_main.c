@@ -207,7 +207,7 @@ void app_main(void)
 
     // Configure log levels for all components
     esp_log_level_set("*", ESP_LOG_DEBUG);           // Default level for all components
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);           // Level for this component
+    esp_log_level_set("rainsens", ESP_LOG_DEBUG);           // Level for this component
     esp_log_level_set("E32-900T30D", ESP_LOG_DEBUG); // Level for LoRa library
 
    // ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
