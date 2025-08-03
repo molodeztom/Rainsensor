@@ -200,15 +200,16 @@ void app_main(void)
      */
     uint32_t ms = 0;
     int hours = 0, minutes = 0, seconds = 0;
-    static uint16_t msg_id = 0; // Message ID for LoRa messages
+    //static uint16_t msg_id = 0; // Message ID for LoRa messages
     TaskHandle_t xBlinkTask = NULL;
     esp_err_t led_err = ESP_OK; // Define led_err once at the beginning of the function
     vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
 
     // Configure log levels for all components
-    esp_log_level_set("*", ESP_LOG_DEBUG);           // Default level for all components
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);           // Level for this component
-    esp_log_level_set("LORA_LIB", ESP_LOG_DEBUG);    // Level for LoRa library
+    esp_log_level_set("*", ESP_LOG_INFO);           // Default level for all components
+    esp_log_level_set(TAG, ESP_LOG_INFO);           // Level for this component
+    esp_log_level_set("LORA_LIB", ESP_LOG_INFO);    // Level for LoRa library
+    esp_log_level_set("gpio", ESP_LOG_ERROR);    // Specifically silence GPIO messages
 
    // ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
     ESP_LOGI(TAG, "Rainsensor Firmware Version: %s", APP_VERSION);
@@ -216,8 +217,8 @@ void app_main(void)
     //ESP_LOGI(TAG, "E32_Lora_Lib git version: %s", E32_LORA_LIB_GIT_VERSION);
 
     e32_config_t config; // E32 configuration structure
-    uint8_t rx_buffer[128];
-    size_t received = 0;
+  //  uint8_t rx_buffer[128];
+   // size_t received = 0;
     initLibrary();
     e32_init_config(&config); // initialize E32 configuration structure
     esp_err_t err = nvs_flash_init();
@@ -592,7 +593,7 @@ static uint16_t calculate_increments_for_interval(double interval_seconds)
     }
 }
 
-static volatile bool send_lora_on_ulp = false;
+//static volatile bool send_lora_on_ulp = false;
 
 static void BlinkTask(void *arg)
 {
@@ -686,7 +687,7 @@ static void reset_counter(void)
     }
 
     uint32_t pulse_count = 0;
-    uint32_t timer_count = 0;
+//    uint32_t timer_count = 0;
 
     err = nvs_set_u32(handle, count_key, pulse_count);
     if (err != ESP_OK)
