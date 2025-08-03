@@ -60,6 +60,7 @@ RainSensor
   20250803  V0.9.22         Add constants for all magic numbers, use them in code
   20250803  V0.9.23         Remove unused debug calculations when in release mode
   20250803  V0.9.24         Add Kconfig option to enable/disable debug output, move main receive lora messsage functionality to E32_Lora_Lib
+  20250803  V0.9.25         Add version number to E32_Lora_Lib.h and E32_Lora_Lib.c, use it in initLibrary
   */
 
 /*
@@ -180,7 +181,13 @@ static void increment_and_store_messageId(uint16_t *messageId);
 static void task_delay_callback(uint32_t ms);
 
 static const char *TAG = "rainsens";
+
+// Use the version number extracted from Git tags if available, otherwise use a default
+#ifdef APP_VERSION_NUMBER
+#define RAINSENSOR_VERSION "V" APP_VERSION_NUMBER
+#else
 #define RAINSENSOR_VERSION "V0.9.24"
+#endif
 
 static led_strip_handle_t led_strip;
 
