@@ -59,6 +59,7 @@ RainSensor
   20250803  V0.9.21         Use ESP_LOGD for debug output, removed ESP_LOGI for debug output where it was not needed
   20250803  V0.9.22         Add constants for all magic numbers, use them in code
   20250803  V0.9.23         Remove unused debug calculations when in release mode
+  20250803  V0.9.24         Add Kconfig option to enable/disable debug output, move main receive lora messsage functionality to E32_Lora_Lib
   */
 
 /*
@@ -105,6 +106,10 @@ When disabled, the detailed debug output in the update_timer_count function will
 #define LORA_CHANNEL_DEFAULT 0x06    // Default channel (902.875MHz)
 #define LORA_EVENT_ID_DEFAULT 0x0001 // Default event ID
 #define LORA_MAX_PAYLOAD_SIZE 58     // E32-900T30D max payload size in bytes
+#define LORA_MESSAGE_TERMINATOR '!'  // Character that marks the end of a LoRa message
+
+// Buffer and formatting constants
+#define HEX_CHARS_PER_BYTE 3  // Each byte becomes 2 hex chars + 1 space in string representation
 
 // Time-related constants
 #define STARTUP_DELAY_MS 1000      // Delay at startup to allow monitor reconnection
@@ -172,9 +177,10 @@ static void send_lora_message(uint32_t pulse_count, int hours, int minutes, int 
 static void receive_lora_message(void);
 static uint16_t read_messageId_fromNVS();
 static void increment_and_store_messageId(uint16_t *messageId);
+static void task_delay_callback(uint32_t ms);
 
 static const char *TAG = "rainsens";
-#define RAINSENSOR_VERSION "V0.9.22"
+#define RAINSENSOR_VERSION "V0.9.24"
 
 static led_strip_handle_t led_strip;
 
@@ -709,10 +715,10 @@ static void test_for_garbage_bytes(const uint8_t *buf, size_t len)
         ESP_LOGW(TAG, "Garbage bytes detected at start of message (%d bytes):", (int)i);
 
         // Create a buffer for the hex string
-        char hex_str[i * 3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
+        char hex_str[i * HEX_CHARS_PER_BYTE + 1]; // Space for hex representation + null terminator
         for (size_t j = 0; j < i; ++j)
         {
-            sprintf(hex_str + j * 3, "%02X ", buf[j]);
+            sprintf(hex_str + j * HEX_CHARS_PER_BYTE, "%02X ", buf[j]);
         }
         ESP_LOGW(TAG, "GARBAGE HEX: %s", hex_str);
 
@@ -728,10 +734,10 @@ static void test_for_garbage_bytes(const uint8_t *buf, size_t len)
 static void print_buffer_hex(const uint8_t *buf, size_t len)
 {
     // Create a buffer for the hex string
-    char hex_str[len * 3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
+    char hex_str[len * HEX_CHARS_PER_BYTE + 1]; // Space for hex representation + null terminator
     for (size_t i = 0; i < len; i++)
     {
-        sprintf(hex_str + i * 3, "%02X ", buf[i]);
+        sprintf(hex_str + i * HEX_CHARS_PER_BYTE, "%02X ", buf[i]);
     }
     ESP_LOGD(TAG, "HEX: %s", hex_str);
 }
@@ -780,47 +786,60 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
     }
 }
 
-static void receive_lora_message()
+/**
+ * @brief Callback function for task delays
+ *
+ * This function is passed to the E32 library to implement delays using FreeRTOS task delay.
+ *
+ * @param ms Delay time in milliseconds
+ */
+static void task_delay_callback(uint32_t ms)
 {
-// Wait for reply up to 5 seconds, polling every 200ms
-#define LORA_RX_BUFFER_SIZE 128
-#define LORA_REPLY_TIMEOUT_MS 5000
-#define LORA_RECEIVE_POLL_MS 200
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+/**
+ * @brief Receive and process LoRa messages
+ *
+ * This function uses the E32 library's message reception with terminator functionality
+ * and processes the received messages. It handles:
+ * 1. Message reception with timeout and terminator detection
+ * 2. Processing of complete and partial messages
+ * 3. Checking for garbage bytes at the start of messages
+ *
+ * The function delegates the polling and message accumulation to the library while
+ * keeping the application-specific processing in this function.
+ */
+static void receive_lora_message(void)
+{
     uint8_t rx_buffer[LORA_RX_BUFFER_SIZE];
     size_t total_received = 0;
-    uint32_t waited_ms = 0;
     esp_err_t err = ESP_OK;
-    bool got_terminator = false;
+    
+    // Initial delay before starting to receive
     vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_DELAY_MS));
-    ESP_LOGD(TAG, "Waiting for reply up to %d ms...", LORA_REPLY_TIMEOUT_MS);
-    while (waited_ms < LORA_REPLY_TIMEOUT_MS && !got_terminator && total_received < LORA_RX_BUFFER_SIZE)
-    {
-        size_t received = 0;
-        err = e32_receive_data(rx_buffer + total_received, LORA_RX_BUFFER_SIZE - total_received, &received);
-        if (err == ESP_OK && received > 0)
-        {
-            // Check for terminator in newly received data
-            for (size_t i = 0; i < received; i++)
-            {
-                if (rx_buffer[total_received + i] == '!')
-                {
-                    got_terminator = true;
-                    total_received += i + 1; // include the terminator
-                    break;
-                }
-            }
-            if (!got_terminator)
-            {
-                total_received += received;
-            }
-        }
-        if (!got_terminator)
-        {
-            vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_POLL_MS));
-            waited_ms += LORA_RECEIVE_POLL_MS;
+    
+    // Use the library function to receive a message with terminator
+    err = e32_receive_message_with_terminator(
+        rx_buffer,
+        LORA_RX_BUFFER_SIZE,
+        &total_received,
+        LORA_MESSAGE_TERMINATOR,
+        LORA_REPLY_TIMEOUT_MS,
+        LORA_RECEIVE_POLL_MS,
+        task_delay_callback
+    );
+    
+    // Process the received message based on the result
+    bool got_terminator = (err == ESP_OK && total_received > 0);
+    for (size_t i = 0; i < total_received; i++) {
+        if (rx_buffer[i] == LORA_MESSAGE_TERMINATOR) {
+            got_terminator = true;
+            break;
         }
     }
-    if (got_terminator)
+    // Process the received message
+    if (total_received > 0)
     {
         // Create a buffer for the message
         char msg_buf[total_received + 1];
@@ -830,22 +849,15 @@ static void receive_lora_message()
         }
         msg_buf[total_received] = '\0';
 
-        ESP_LOGI(TAG, "Received message: %s", msg_buf);
-        print_buffer_hex(rx_buffer, total_received);
-        // Test for garbage bytes at start
-        test_for_garbage_bytes(rx_buffer, total_received);
-    }
-    else if (total_received > 0)
-    {
-        // Create a buffer for the message
-        char msg_buf[total_received + 1];
-        for (size_t i = 0; i < total_received; i++)
+        if (got_terminator)
         {
-            msg_buf[i] = rx_buffer[i];
+            ESP_LOGI(TAG, "Received message: %s", msg_buf);
         }
-        msg_buf[total_received] = '\0';
-
-        ESP_LOGI(TAG, "Partial message received (no terminator): %s", msg_buf);
+        else
+        {
+            ESP_LOGI(TAG, "Partial message received (no terminator): %s", msg_buf);
+        }
+        
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
         test_for_garbage_bytes(rx_buffer, total_received);
