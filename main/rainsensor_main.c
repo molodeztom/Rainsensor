@@ -140,13 +140,16 @@ void app_main(void)
     static uint16_t msg_id = 0; // Message ID for LoRa messages
     TaskHandle_t xBlinkTask = NULL;
     vTaskDelay(pdMS_TO_TICKS(1000));
-    /*     esp_log_level_set("*", ESP_LOG_WARN); // Set log level for all components to INFO
-        esp_log_level_set("E32-900T30D", ESP_LOG_INFO); */
-        esp_log_level_set("rainsens", ESP_LOG_INFO); 
-    printf("rainsensor %s\n\n", RAINSENSOR_VERSION);
-    printf("Firmware Version: %s\n", APP_VERSION);
-    printf("E32_Lora_Lib version: %s\n", e32_lora_lib_get_version());
-    printf("E32_Lora_Lib git version: %s\n", E32_LORA_LIB_GIT_VERSION);
+    
+    // Configure log levels for all components
+    esp_log_level_set("*", ESP_LOG_INFO);      // Default level for all components
+    esp_log_level_set(TAG, ESP_LOG_INFO);      // Level for this component
+    esp_log_level_set("E32-900T30D", ESP_LOG_INFO); // Level for LoRa library
+    
+    ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
+    ESP_LOGI(TAG, "Firmware Version: %s", APP_VERSION);
+    ESP_LOGI(TAG, "E32_Lora_Lib version: %s", e32_lora_lib_get_version());
+    ESP_LOGI(TAG, "E32_Lora_Lib git version: %s", E32_LORA_LIB_GIT_VERSION);
 
     e32_config_t config; // E32 configuration structure
     uint8_t rx_buffer[128];
@@ -184,7 +187,7 @@ void app_main(void)
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
-        printf("Not ULP wakeup, initializing ULP\n");
+        ESP_LOGI(TAG, "Not ULP wakeup, initializing ULP");
         init_ulp_program();
         // TODO: change use lora_send_message (add an event code to  struct first)
         const char *message = "Rainsensor initialized";
@@ -193,16 +196,16 @@ void app_main(void)
         // Check if the transmission was successful
         if (result == ESP_OK)
         {
-            ESP_LOGI("Rainsensor", "Initialization message sent successfully.");
+            ESP_LOGI(TAG, "Initialization message sent successfully.");
         }
         else
         {
-            ESP_LOGE("Rainsensor", "Failed to send initialization message: %s", esp_err_to_name(result));
+            ESP_LOGE(TAG, "Failed to send initialization message: %s", esp_err_to_name(result));
         }
     }
     else
     {
-        printf("ULP wakeup, saving pulse count\n");
+        ESP_LOGI(TAG, "ULP wakeup, saving pulse count");
         update_timer_count();
         update_pulse_count();
         // Read updated pulse_count from NVS
@@ -226,7 +229,7 @@ void app_main(void)
     // Optional: sleep before next cycle
     vTaskDelay(pdMS_TO_TICKS(4000));
 
-    printf("Entering deep sleep\n\n");
+    ESP_LOGI(TAG, "Entering deep sleep");
     led_strip_clear(led_strip);
 
     esp_deep_sleep_start();
@@ -258,11 +261,11 @@ static void init_ulp_program(void)
     ulp_edge_count_to_wake_up = 8;
 
     // Debug: Print ULP config variables
-    printf("[DEBUG] ULP io_number (RTC IO): %d (should match GPIO8 RTC IO number)\n", (int)ulp_io_number);
-    printf("[DEBUG] ULP edge_count_to_wake_up: %d\n", (int)ulp_edge_count_to_wake_up);
-    printf("[DEBUG] ULP debounce_counter: %d\n", (int)ulp_debounce_counter);
-    printf("[DEBUG] ULP debounce_max_count: %d\n", (int)ulp_debounce_max_count);
-    printf("[DEBUG] ULP edge_count (before sleep): %d\n", (int)ulp_edge_count);
+    ESP_LOGD(TAG, "ULP io_number (RTC IO): %d (should match GPIO8 RTC IO number)", (int)ulp_io_number);
+    ESP_LOGD(TAG, "ULP edge_count_to_wake_up: %d", (int)ulp_edge_count_to_wake_up);
+    ESP_LOGD(TAG, "ULP debounce_counter: %d", (int)ulp_debounce_counter);
+    ESP_LOGD(TAG, "ULP debounce_max_count: %d", (int)ulp_debounce_max_count);
+    ESP_LOGD(TAG, "ULP edge_count (before sleep): %d", (int)ulp_edge_count);
 
     // ulp_timer_count_low_l = 0;
     ulp_timer_count_low_h = 0;
@@ -274,9 +277,9 @@ static void init_ulp_program(void)
 
     // Pass the increments value to the ULP program
     ulp_time_to_wake_CPU = increments;
-    printf("Wake-up interval: %.2f seconds -> Increments: %u\n", wakeup_interval_seconds, increments);
+    ESP_LOGI(TAG, "Wake-up interval: %.2f seconds -> Increments: %u", wakeup_interval_seconds, increments);
 
-    printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
+    ESP_LOGI(TAG, "Time to wake CPU from ULP: %5" PRIu32, ulp_time_to_wake_CPU);
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
     rtc_gpio_init(gpio_num);
@@ -317,25 +320,25 @@ static void update_pulse_count(void)
     uint32_t pulse_count = 0;
     esp_err_t err = nvs_get_u32(handle, count_key, &pulse_count);
     assert(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
-    printf("Read pulse count from NVS: %5" PRIu32 "\n", pulse_count);
+    ESP_LOGI(TAG, "Read pulse count from NVS: %5" PRIu32, pulse_count);
 
     /* ULP program counts signal edges, convert that to the number of pulses */
     uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / 2;
     /* In case of an odd number of edges, keep one until next time, result is 0 or 1! */
     ulp_edge_count = ulp_edge_count % 2;
-    printf("pulse count from ULP: %5" PRIu32 "\n", pulse_count_from_ulp);
+    ESP_LOGI(TAG, "Pulse count from ULP: %5" PRIu32, pulse_count_from_ulp);
 
     /* Save the new pulse count to NVS */
     pulse_count += pulse_count_from_ulp;
     ESP_ERROR_CHECK(nvs_set_u32(handle, count_key, pulse_count));
     ESP_ERROR_CHECK(nvs_commit(handle));
     nvs_close(handle);
-    printf("Wrote updated pulse count to NVS: %5" PRIu32 "\n", pulse_count);
+    ESP_LOGI(TAG, "Wrote updated pulse count to NVS: %5" PRIu32, pulse_count);
 
     // Debug: Print ULP variables after update
-    printf("[DEBUG] ULP edge_count (after wakeup): %d\n", (int)ulp_edge_count);
-    printf("[DEBUG] ULP io_number (RTC IO): %d\n", (int)ulp_io_number);
-    printf("[DEBUG] ULP edge_count_to_wake_up: %d\n", (int)ulp_edge_count_to_wake_up);
+    ESP_LOGD(TAG, "ULP edge_count (after wakeup): %d", (int)ulp_edge_count);
+    ESP_LOGD(TAG, "ULP io_number (RTC IO): %d", (int)ulp_io_number);
+    ESP_LOGD(TAG, "ULP edge_count_to_wake_up: %d", (int)ulp_edge_count_to_wake_up);
 }
 
 static void update_timer_count(void)
@@ -350,35 +353,35 @@ static void update_timer_count(void)
 
     nvs_close(handle);
     uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
-    printf("time to wake CPU from ULP: %5" PRIu32 "\n", ulp_time_to_wake_CPU);
+    ESP_LOGI(TAG, "Time to wake CPU from ULP: %5" PRIu32, ulp_time_to_wake_CPU);
 
     uint32_t ulp_TIMER_LOW_H = (ulp_timer_count_low_h & UINT16_MAX);
-    printf("timer count high from ULP: %5" PRIu32 "\n", ulp_TIMER_LOW_H);
+    ESP_LOGI(TAG, "Timer count high from ULP: %5" PRIu32, ulp_TIMER_LOW_H);
 
     uint32_t ulp_TIMER_HIGH = (ulp_timer_count_high & UINT16_MAX);
-    printf("timer count upper from ULP: %5" PRIu32 "\n", ulp_TIMER_HIGH);
+    ESP_LOGI(TAG, "Timer count upper from ULP: %5" PRIu32, ulp_TIMER_HIGH);
 
     uint32_t ulp_START_TIME_LOW_H = (ulp_start_time_low_h & UINT16_MAX);
-    printf("start_time_low_h: %5" PRIu32 "\n", ulp_START_TIME_LOW_H);
+    ESP_LOGI(TAG, "Start_time_low_h: %5" PRIu32, ulp_START_TIME_LOW_H);
 
     uint32_t ulp_START_TIME_HIGH = (ulp_start_time_high & UINT16_MAX);
-    printf("start_time_high: %5" PRIu32 "\n", ulp_START_TIME_HIGH);
+    ESP_LOGI(TAG, "Start_time_high: %5" PRIu32, ulp_START_TIME_HIGH);
 
     uint32_t ulp_TIMER_COUNT = (ulp_timer_count & UINT16_MAX);
-    printf("timer_count: %5" PRIu32 "\n", ulp_TIMER_COUNT);
+    ESP_LOGI(TAG, "Timer_count: %5" PRIu32, ulp_TIMER_COUNT);
 
     uint32_t ulp_TEST_DIV = (ulp_test_div & UINT16_MAX);
-    printf("Test Value: %5" PRIu32 "\n", ulp_TEST_DIV);
+    ESP_LOGI(TAG, "Test Value: %5" PRIu32, ulp_TEST_DIV);
 
     uint32_t ulp_EDGE_COUNT = (ulp_edge_count & UINT16_MAX);
-    printf("Edge Count: %5" PRIu32 "\n", ulp_EDGE_COUNT);
+    ESP_LOGI(TAG, "Edge Count: %5" PRIu32, ulp_EDGE_COUNT);
 
     uint32_t ulp_EDGE_COUNT_TO_WAKE_UP = (ulp_edge_count_to_wake_up & UINT16_MAX);
-    printf("Edge Count to wake up: %5" PRIu32 "\n", ulp_EDGE_COUNT_TO_WAKE_UP);
+    ESP_LOGI(TAG, "Edge Count to wake up: %5" PRIu32, ulp_EDGE_COUNT_TO_WAKE_UP);
 
     uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
                            ((uint32_t)ulp_TIMER_LOW_H << 16);
-    printf("ULP Timerwert: %llu Ticks\n", timer_value);
+    ESP_LOGI(TAG, "ULP Timerwert: %llu Ticks", timer_value);
 
     uint32_t ms = calculate_time_ms(timer_value);
 
@@ -387,7 +390,7 @@ static void update_timer_count(void)
     format_time(ms, &hours, &minutes, &seconds);
 
     // Output the elapsed time in h:mm:ss format
-    printf("Elapsed Time: %02d:%02d:%02d\n", hours, minutes, seconds);
+    ESP_LOGI(TAG, "Elapsed Time: %02d:%02d:%02d", hours, minutes, seconds);
 }
 
 // Function to calculate the elapsed time in milliseconds
@@ -497,30 +500,32 @@ static void test_for_garbage_bytes(const uint8_t *buf, size_t len)
     if (i > 0)
     {
         garbage_error_counter++;
-        ESP_LOGW("rainsens", "Garbage bytes detected at start of message (%d bytes):", (int)i);
-        printf("[GARBAGE HEX]: ");
-        for (size_t j = 0; j < i; ++j)
-        {
-            printf("%02X ", buf[j]);
+        ESP_LOGW(TAG, "Garbage bytes detected at start of message (%d bytes):", (int)i);
+        
+        // Create a buffer for the hex string
+        char hex_str[i*3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
+        for (size_t j = 0; j < i; ++j) {
+            sprintf(hex_str + j*3, "%02X ", buf[j]);
         }
-        printf("\n");
-        ESP_LOGW("rainsens", "Total garbage errors so far: %d", garbage_error_counter);
+        ESP_LOGW(TAG, "GARBAGE HEX: %s", hex_str);
+        
+        ESP_LOGW(TAG, "Total garbage errors so far: %d", garbage_error_counter);
     }
     message_counter++;
     if (message_counter % 10 == 0)
     {
-        printf("[INFO] Garbage error counter after %d messages: %d\n", message_counter, garbage_error_counter);
+        ESP_LOGI(TAG, "Garbage error counter after %d messages: %d", message_counter, garbage_error_counter);
     }
 }
 
 static void print_buffer_hex(const uint8_t *buf, size_t len)
 {
-    printf("[HEX]: ");
-    for (size_t i = 0; i < len; i++)
-    {
-        printf("%02X ", buf[i]);
+    // Create a buffer for the hex string
+    char hex_str[len*3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
+    for (size_t i = 0; i < len; i++) {
+        sprintf(hex_str + i*3, "%02X ", buf[i]);
     }
-    printf("\n");
+    ESP_LOGI(TAG, "HEX: %s", hex_str);
 }
 
 void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds, uint32_t elapsed_ms, int send_counter)
@@ -544,10 +549,10 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
         return;
     }
     snprintf(elapsed_time_str, sizeof(elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
-    printf("messageID before increment: %u", messageID);
+    ESP_LOGI(TAG, "MessageID before increment: %u", messageID);
     payload.messageID = messageID; // Use messageID from NVS
     increment_and_store_messageId(&messageID); // Increment and store new messageID in NVS
-    printf("messageID after increment: %u", messageID);
+    ESP_LOGI(TAG, "MessageID after increment: %u", messageID);
     payload.lora_eventID = 0x0001; // Example event ID, change as needed
     payload.elapsed_time_ms = elapsed_ms;
     payload.pulse_count = pulse_count;
@@ -559,9 +564,9 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
              (unsigned long)payload.pulse_count,
              (unsigned long)payload.messageID,
              payload.checksum);
-    printf("[DEBUG] Send counter: %lu\n", (unsigned long)payload.messageID);
-    printf("[DEBUG] Checksum: 0x%04X\n", payload.checksum);
-    ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
+   ESP_LOGD(TAG, "Send counter: %lu", (unsigned long)payload.messageID);
+   ESP_LOGD(TAG, "Checksum: 0x%04X", payload.checksum);
+   ESP_ERROR_CHECK(e32_send_data((uint8_t *)&payload, sizeof(payload)));
 }
 
 static void receive_lora_message()
@@ -606,31 +611,35 @@ static void receive_lora_message()
     }
     if (got_terminator)
     {
-        printf("Received message: ");
-        for (size_t i = 0; i < total_received; i++)
-        {
-            printf("%c", rx_buffer[i]);
+        // Create a buffer for the message
+        char msg_buf[total_received + 1];
+        for (size_t i = 0; i < total_received; i++) {
+            msg_buf[i] = rx_buffer[i];
         }
-        printf("\n");
+        msg_buf[total_received] = '\0';
+        
+        ESP_LOGI(TAG, "Received message: %s", msg_buf);
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
         test_for_garbage_bytes(rx_buffer, total_received);
     }
     else if (total_received > 0)
     {
-        printf("Partial message received (no terminator): ");
-        for (size_t i = 0; i < total_received; i++)
-        {
-            printf("%c", rx_buffer[i]);
+        // Create a buffer for the message
+        char msg_buf[total_received + 1];
+        for (size_t i = 0; i < total_received; i++) {
+            msg_buf[i] = rx_buffer[i];
         }
-        printf("\n");
+        msg_buf[total_received] = '\0';
+        
+        ESP_LOGI(TAG, "Partial message received (no terminator): %s", msg_buf);
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
         test_for_garbage_bytes(rx_buffer, total_received);
     }
     else
     {
-        printf("No reply received within timeout\n");
+        ESP_LOGI(TAG, "No reply received within timeout");
     }
 }
 
@@ -646,18 +655,18 @@ uint16_t read_messageId_fromNVS()
         if (err == ESP_ERR_NVS_NOT_FOUND)
         {
             messageId = 0; // not found, start at 0
-            printf("No messageID found in NVS, starting at 0\n");
+            ESP_LOGI(TAG, "No messageID found in NVS, starting at 0");
         }
         else if (err != ESP_OK)
         {
-            printf("Error reading messageID from NVS: %s\n", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Error reading messageID from NVS: %s", esp_err_to_name(err));
             // handle error (log etc)
         }
         nvs_close(handle);
     }
     else
     {
-        printf("Error opening NVS: %s\n", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Error opening NVS: %s", esp_err_to_name(err));
         // handle error opening NVS
     }
     return messageId;
@@ -668,7 +677,7 @@ void increment_and_store_messageId(uint16_t *messageID)
     ESP_LOGI(TAG, "Incrementing and storing messageID in NVS %u", *messageID);
     *messageID = *messageID + 1; // Increment messageID
 
-    printf("New messageID: %u\n", *messageID);
+    ESP_LOGI(TAG, "New messageID: %u", *messageID);
     nvs_handle_t handle;
     ESP_ERROR_CHECK(nvs_open(nvs_namespace, NVS_READWRITE, &handle));
     ESP_ERROR_CHECK(nvs_set_u16(handle, "messageID", *messageID));
