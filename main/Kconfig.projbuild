@@ -46,4 +46,11 @@ menu "Example Configuration"
         help
             Define the blinking period in milliseconds.
 
+    config ENABLE_DEBUG_OUTPUT
+        bool "Enable detailed debug output"
+        default y
+        help
+            Enable detailed debug output for development and troubleshooting.
+            Disable this option in release builds to reduce code size and improve performance.
+
 endmenu

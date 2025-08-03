@@ -58,7 +58,17 @@ RainSensor
   20250803  V0.9.20         Improved error handling: added explicit error checks and recovery mechanisms
   20250803  V0.9.21         Use ESP_LOGD for debug output, removed ESP_LOGI for debug output where it was not needed
   20250803  V0.9.22         Add constants for all magic numbers, use them in code
+  20250803  V0.9.23         Remove unused debug calculations when in release mode
   */
+
+/*
+To enable or disable debug output:
+Run idf.py menuconfig
+Navigate to "Example Configuration" → "Enable detailed debug output"
+Toggle the option as needed
+Save the configuration and rebuild the project
+When disabled, the detailed debug output in the update_timer_count function will not be compiled, resulting in smaller code size and better performance in release builds.
+*/
 
 #include <stdio.h>
 #include <inttypes.h>
@@ -92,9 +102,9 @@ RainSensor
 #define LORA_RECEIVE_POLL_MS 200   // Polling interval (ms) when waiting for a reply
 
 // LoRa configuration constants
-#define LORA_CHANNEL_DEFAULT 0x06      // Default channel (902.875MHz)
-#define LORA_EVENT_ID_DEFAULT 0x0001   // Default event ID
-#define LORA_MAX_PAYLOAD_SIZE 58       // E32-900T30D max payload size in bytes
+#define LORA_CHANNEL_DEFAULT 0x06    // Default channel (902.875MHz)
+#define LORA_EVENT_ID_DEFAULT 0x0001 // Default event ID
+#define LORA_MAX_PAYLOAD_SIZE 58     // E32-900T30D max payload size in bytes
 
 // Time-related constants
 #define STARTUP_DELAY_MS 1000      // Delay at startup to allow monitor reconnection
@@ -107,10 +117,14 @@ RainSensor
 #define TIMER_COUNTER_MAX 65536.0  // Maximum value of timer counter (2^16)
 
 // ULP pulse counting parameters
-#define ULP_DEBOUNCE_COUNT 3           // Debounce counter initial value - filters out noise by requiring signal to be stable for this many samples
-#define ULP_DEBOUNCE_MAX_COUNT 3       // Maximum debounce count - with ULP wakeup period of 20ms, this creates a minimum pulse width of 80ms (20ms * (3+1))
-#define ULP_EDGES_PER_PULSE 2          // Number of edges per complete pulse (rising + falling) - used to convert edge count to pulse count
-#define ULP_PULSES_TO_WAKE_UP 4        // Number of complete pulses (rain drops) required to wake up the CPU
+#define ULP_PULSE_COUNTING_GPIO GPIO_NUM_8 // GPIO pin used for pulse counting (Hall sensor input)
+#define ULP_DEBOUNCE_COUNT 3               // Debounce counter initial value - filters out noise by requiring signal to be stable for this many samples
+#define ULP_DEBOUNCE_MAX_COUNT 3           // Maximum debounce count - with ULP wakeup period of 20ms, this creates a minimum pulse width of 80ms (20ms * (3+1))
+#define ULP_EDGES_PER_PULSE 2              // Number of edges per complete pulse (rising + falling) - used to convert edge count to pulse count
+#define ULP_PULSES_TO_WAKE_UP 4            // Number of complete pulses (rain drops) required to wake up the CPU
+
+// ULP memory access constants
+#define ULP_16BIT_MASK UINT16_MAX // Mask for accessing 16-bit values from ULP memory (ULP only reads lower 16 bits)
 
 // LED and ULP parameters
 #define BLINK_GPIO CONFIG_BLINK_GPIO              // GPIO for addressable LED strip
@@ -120,7 +134,6 @@ static const double wakeup_interval_seconds = 60; // Time to wake CPU if at leas
 // #define RTC_SLOW_CLK_FREQ 68359   // RTC slow clock frequency (17.5 MHz oscillator / 256)
 #define TASK_DONE_BIT (1 << 0) // Bitmask for event group
 static const char *nvs_namespace = "pulsecnt";
-
 
 // LED color constants (R, G, B values)
 #define LED_COLOR_RED_R 230
@@ -178,12 +191,12 @@ void app_main(void)
     TaskHandle_t xBlinkTask = NULL;
     esp_err_t led_err = ESP_OK; // Define led_err once at the beginning of the function
     vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
-    
+
     // Configure log levels for all components
-    esp_log_level_set("*", ESP_LOG_DEBUG);      // Default level for all components
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);      // Level for this component
+    esp_log_level_set("*", ESP_LOG_DEBUG);           // Default level for all components
+    esp_log_level_set(TAG, ESP_LOG_DEBUG);           // Level for this component
     esp_log_level_set("E32-900T30D", ESP_LOG_DEBUG); // Level for LoRa library
-    
+
     ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
     ESP_LOGI(TAG, "Firmware Version: %s", APP_VERSION);
     ESP_LOGI(TAG, "E32_Lora_Lib version: %s", e32_lora_lib_get_version());
@@ -195,14 +208,16 @@ void app_main(void)
     initLibrary();
     e32_init_config(&config); // initialize E32 configuration structure
     esp_err_t err = nvs_flash_init();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to initialize NVS flash: %s", esp_err_to_name(err));
         // This is critical, so we should return
         return;
     }
-    
+
     err = esp_sleep_enable_ulp_wakeup();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to enable ULP wakeup: %s", esp_err_to_name(err));
         // This is critical, so we should return
         return;
@@ -211,8 +226,8 @@ void app_main(void)
     config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
     config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
     config.OPTION.fec = FEC_ENABLE;
-    config.CHAN = LORA_CHANNEL_DEFAULT;  // set channel to 6 (902.875MHz)
-    sendConfiguration(&config); // E32 configuration structure
+    config.CHAN = LORA_CHANNEL_DEFAULT; // set channel to 6 (902.875MHz)
+    sendConfiguration(&config);         // E32 configuration structure
     // Note: sendConfiguration doesn't return an error code
 
     vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB)); // wait for command to be processed
@@ -231,13 +246,15 @@ void app_main(void)
     /* Configure the peripheral according to the LED type */
     configure_led();
     led_err = led_strip_set_pixel(led_strip, 0, LED_COLOR_GREEN_R, LED_COLOR_GREEN_G, LED_COLOR_GREEN_B);
-    if (led_err != ESP_OK) {
+    if (led_err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to set LED pixel: %s", esp_err_to_name(led_err));
     }
-    
+
     /* Refresh the strip to send data */
     led_err = led_strip_refresh(led_strip);
-    if (led_err != ESP_OK) {
+    if (led_err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
     }
 
@@ -268,12 +285,16 @@ void app_main(void)
         // Read updated pulse_count from NVS
         nvs_handle_t handle;
         esp_err_t err = nvs_open(nvs_namespace, NVS_READONLY, &handle);
-        if (err != ESP_OK) {
+        if (err != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
             // Continue with pulse_count = 0 as fallback
-        } else {
+        }
+        else
+        {
             err = nvs_get_u32(handle, "count", &pulse_count);
-            if (err != ESP_OK) {
+            if (err != ESP_OK)
+            {
                 ESP_LOGE(TAG, "Failed to read pulse count from NVS: %s", esp_err_to_name(err));
                 // Continue with pulse_count = 0 as fallback
             }
@@ -297,7 +318,8 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Entering deep sleep");
     led_err = led_strip_clear(led_strip);
-    if (led_err != ESP_OK) {
+    if (led_err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to clear LED strip: %s", esp_err_to_name(led_err));
     }
 
@@ -307,16 +329,16 @@ void app_main(void)
 static void init_ulp_program(void)
 {
     esp_err_t err = ulp_load_binary(0, ulp_main_bin_start,
-                                     (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t));
-    if (err != ESP_OK) {
+                                    (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t));
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to load ULP binary: %s", esp_err_to_name(err));
         return;
     }
 
     /* GPIO used for pulse counting. */
-    gpio_num_t gpio_num = GPIO_NUM_8;
-    int rtcio_num = rtc_io_number_get(gpio_num);
-    assert(rtc_gpio_is_valid_gpio(gpio_num) && "GPIO used for pulse counting must be an RTC IO");
+    int rtcio_num = rtc_io_number_get(ULP_PULSE_COUNTING_GPIO);
+    assert(rtc_gpio_is_valid_gpio(ULP_PULSE_COUNTING_GPIO) && "GPIO used for pulse counting must be an RTC IO");
 
     /* Initialize some variables used by ULP program.
      * Each 'ulp_xyz' variable corresponds to 'xyz' variable in the ULP program.
@@ -329,7 +351,7 @@ static void init_ulp_program(void)
      */
     ulp_debounce_counter = ULP_DEBOUNCE_COUNT;
     ulp_debounce_max_count = ULP_DEBOUNCE_MAX_COUNT;
-    ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */
+    ulp_io_number = rtcio_num; /* map from GPIO# to RTC_IO# */                                              /* map from GPIO# to RTC_IO# */
     ulp_edge_count_to_wake_up = ULP_PULSES_TO_WAKE_UP * ULP_EDGES_PER_PULSE; // Set wake-up threshold based on pulse count
 
     // Debug: Print ULP config variables
@@ -354,11 +376,11 @@ static void init_ulp_program(void)
     ESP_LOGD(TAG, "Time to wake CPU from ULP: %5" PRIu32, ulp_time_to_wake_CPU);
 
     /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
-    rtc_gpio_init(gpio_num);
-    rtc_gpio_set_direction(gpio_num, RTC_GPIO_MODE_INPUT_ONLY);
-    rtc_gpio_pulldown_dis(gpio_num);
-    rtc_gpio_pullup_dis(gpio_num);
-    rtc_gpio_hold_en(gpio_num);
+    rtc_gpio_init(ULP_PULSE_COUNTING_GPIO);
+    rtc_gpio_set_direction(ULP_PULSE_COUNTING_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pulldown_dis(ULP_PULSE_COUNTING_GPIO);
+    rtc_gpio_pullup_dis(ULP_PULSE_COUNTING_GPIO);
+    rtc_gpio_hold_en(ULP_PULSE_COUNTING_GPIO);
 
 #if CONFIG_IDF_TARGET_ESP32
     /* Disconnect GPIO12 and GPIO15 to remove current drain through
@@ -379,7 +401,8 @@ static void init_ulp_program(void)
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to start ULP program: %s", esp_err_to_name(err));
         return;
     }
@@ -392,27 +415,32 @@ static void update_pulse_count(void)
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return;
     }
-    
+
     uint32_t pulse_count = 0;
     err = nvs_get_u32(handle, count_key, &pulse_count);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND)
+    {
         ESP_LOGE(TAG, "Error reading pulse count from NVS: %s", esp_err_to_name(err));
         nvs_close(handle);
         return;
     }
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
+
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+    {
         ESP_LOGI(TAG, "No pulse count found in NVS, starting at 0");
-    } else {
+    }
+    else
+    {
         ESP_LOGD(TAG, "Read pulse count from NVS: %5" PRIu32, pulse_count);
     }
 
     /* ULP program counts signal edges, convert that to the number of pulses */
-    uint32_t pulse_count_from_ulp = (ulp_edge_count & UINT16_MAX) / ULP_EDGES_PER_PULSE;
+    uint32_t pulse_count_from_ulp = (ulp_edge_count & ULP_16BIT_MASK) / ULP_EDGES_PER_PULSE;
     /* In case of an odd number of edges, keep one until next time, result is 0 or 1! */
     ulp_edge_count = ulp_edge_count % ULP_EDGES_PER_PULSE;
     ESP_LOGI(TAG, "Pulse count from ULP: %5" PRIu32, pulse_count_from_ulp);
@@ -420,19 +448,23 @@ static void update_pulse_count(void)
     /* Save the new pulse count to NVS */
     pulse_count += pulse_count_from_ulp;
     err = nvs_set_u32(handle, count_key, pulse_count);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to write pulse count to NVS: %s", esp_err_to_name(err));
         nvs_close(handle);
         return;
     }
-    
+
     err = nvs_commit(handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to commit changes to NVS: %s", esp_err_to_name(err));
-    } else {
+    }
+    else
+    {
         ESP_LOGI(TAG, "Wrote updated pulse count to NVS: %5" PRIu32, pulse_count);
     }
-    
+
     nvs_close(handle);
 
     // Debug: Print ULP variables after update
@@ -443,53 +475,60 @@ static void update_pulse_count(void)
 
 static void update_timer_count(void)
 {
-    //const char *nvs_namespace = "pulsecnt";
+    // const char *nvs_namespace = "pulsecnt";
     const char *count_key = "pulse";
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(nvs_namespace, NVS_READONLY, &handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return;
     }
-    
-    uint32_t timer_count = 1;
-    err = nvs_get_u32(handle, count_key, &timer_count);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+
+    uint32_t timer_count_nvs = 1;
+    err = nvs_get_u32(handle, count_key, &timer_count_nvs);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND)
+    {
         ESP_LOGE(TAG, "Error reading timer count from NVS: %s", esp_err_to_name(err));
     }
-
     nvs_close(handle);
-    uint32_t ulp_TIME_TO_WAKEUP_CPU = (ulp_time_to_wake_CPU & UINT16_MAX);
-    ESP_LOGD(TAG, "Time to wake CPU from ULP: %5" PRIu32, ulp_time_to_wake_CPU);
 
-    uint32_t ulp_TIMER_LOW_H = (ulp_timer_count_low_h & UINT16_MAX);
-    ESP_LOGD(TAG, "Timer count high from ULP: %5" PRIu32, ulp_TIMER_LOW_H);
+    // These variables are needed for the timer calculation regardless of debug mode
+    uint32_t timer_low_h = (ulp_timer_count_low_h & ULP_16BIT_MASK);
+    uint32_t timer_high = (ulp_timer_count_high & ULP_16BIT_MASK);
 
-    uint32_t ulp_TIMER_HIGH = (ulp_timer_count_high & UINT16_MAX);
-    ESP_LOGD(TAG, "Timer count upper from ULP: %5" PRIu32, ulp_TIMER_HIGH);
+    // Combine high and low timer values to get the full 48-bit timer value
+    uint64_t timer_value = ((uint64_t)timer_high << 32) |
+                           ((uint32_t)timer_low_h << 16);
 
-    uint32_t ulp_START_TIME_LOW_H = (ulp_start_time_low_h & UINT16_MAX);
-    ESP_LOGD(TAG, "Start_time_low_h: %5" PRIu32, ulp_START_TIME_LOW_H);
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
+    // Detailed debug output - only compiled in debug builds
+    uint32_t time_to_wakeup = (ulp_time_to_wake_CPU & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Time to wake CPU from ULP: %5" PRIu32, time_to_wakeup);
+    ESP_LOGD(TAG, "Timer count high from ULP: %5" PRIu32, timer_low_h);
+    ESP_LOGD(TAG, "Timer count upper from ULP: %5" PRIu32, timer_high);
 
-    uint32_t ulp_START_TIME_HIGH = (ulp_start_time_high & UINT16_MAX);
-    ESP_LOGD(TAG, "Start_time_high: %5" PRIu32, ulp_START_TIME_HIGH);
+    uint32_t start_time_low_h = (ulp_start_time_low_h & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Start_time_low_h: %5" PRIu32, start_time_low_h);
 
-    uint32_t ulp_TIMER_COUNT = (ulp_timer_count & UINT16_MAX);
-    ESP_LOGD(TAG, "Timer_count: %5" PRIu32, ulp_TIMER_COUNT);
+    uint32_t start_time_high = (ulp_start_time_high & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Start_time_high: %5" PRIu32, start_time_high);
 
-    uint32_t ulp_TEST_DIV = (ulp_test_div & UINT16_MAX);
-    ESP_LOGD(TAG, "Test Value: %5" PRIu32, ulp_TEST_DIV);
+    uint32_t timer_count = (ulp_timer_count & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Timer_count: %5" PRIu32, timer_count);
 
-    uint32_t ulp_EDGE_COUNT = (ulp_edge_count & UINT16_MAX);
-    ESP_LOGD(TAG, "Edge Count: %5" PRIu32, ulp_EDGE_COUNT);
+    uint32_t test_div = (ulp_test_div & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Test Value: %5" PRIu32, test_div);
 
-    uint32_t ulp_EDGE_COUNT_TO_WAKE_UP = (ulp_edge_count_to_wake_up & UINT16_MAX);
-    ESP_LOGD(TAG, "Edge Count to wake up: %5" PRIu32, ulp_EDGE_COUNT_TO_WAKE_UP);
+    uint32_t edge_count = (ulp_edge_count & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Edge Count: %5" PRIu32, edge_count);
 
-    uint64_t timer_value = ((uint64_t)ulp_TIMER_HIGH << 32) |
-                           ((uint32_t)ulp_TIMER_LOW_H << 16);
+    uint32_t edge_count_to_wake_up = (ulp_edge_count_to_wake_up & ULP_16BIT_MASK);
+    ESP_LOGD(TAG, "Edge Count to wake up: %5" PRIu32, edge_count_to_wake_up);
+
     ESP_LOGD(TAG, "ULP Timerwert: %llu Ticks", timer_value);
+#endif // CONFIG_ENABLE_DEBUG_OUTPUT
 
     uint32_t ms = calculate_time_ms(timer_value);
 
@@ -518,9 +557,9 @@ static uint64_t calculate_ticks_from_seconds(double seconds)
 // Function to convert milliseconds into hours, minutes, and seconds
 static void format_time(uint32_t ms, int *hours, int *minutes, int *seconds)
 {
-    *hours = ms / MS_PER_HOUR;             // Calculate hours
-    *minutes = (ms % MS_PER_HOUR) / MS_PER_MINUTE; // Calculate minutes
-    *seconds = (ms % MS_PER_MINUTE) / MS_PER_SECOND;    // Calculate seconds
+    *hours = ms / MS_PER_HOUR;                       // Calculate hours
+    *minutes = (ms % MS_PER_HOUR) / MS_PER_MINUTE;   // Calculate minutes
+    *seconds = (ms % MS_PER_MINUTE) / MS_PER_SECOND; // Calculate seconds
 }
 
 // Function to calculate the number of timer_count_low_h increments for a given interval
@@ -548,43 +587,50 @@ static void BlinkTask(void *arg)
     for (int i = 0; i < 3; i++)
     {
         esp_err_t led_err = led_strip_set_pixel(led_strip, 0, LED_COLOR_RED_R, LED_COLOR_RED_G, LED_COLOR_RED_B);
-        if (led_err != ESP_OK) {
+        if (led_err != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to set LED pixel (red): %s", esp_err_to_name(led_err));
         }
-        
+
         led_err = led_strip_refresh(led_strip);
-        if (led_err != ESP_OK) {
+        if (led_err != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
         }
-        
+
         vTaskDelay(pdMS_TO_TICKS(LED_BLINK_INTERVAL_MS));
-        
+
         led_err = led_strip_set_pixel(led_strip, 0, LED_COLOR_GREEN_R, LED_COLOR_GREEN_G, LED_COLOR_GREEN_B);
-        if (led_err != ESP_OK) {
+        if (led_err != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to set LED pixel (green): %s", esp_err_to_name(led_err));
         }
-        
+
         led_err = led_strip_refresh(led_strip);
-        if (led_err != ESP_OK) {
+        if (led_err != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
         }
         vTaskDelay(pdMS_TO_TICKS(LED_BLINK_INTERVAL_MS));
     }
     esp_err_t led_err = led_strip_set_pixel(led_strip, 0, LED_COLOR_WHITE_R, LED_COLOR_WHITE_G, LED_COLOR_WHITE_B);
-    if (led_err != ESP_OK) {
+    if (led_err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to set LED pixel (white): %s", esp_err_to_name(led_err));
     }
-    
+
     led_err = led_strip_refresh(led_strip);
-    if (led_err != ESP_OK) {
+    if (led_err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
     }
-    
+
     vTaskDelay(pdMS_TO_TICKS(LED_BLINK_INTERVAL_MS));
     xEventGroupSetBits(blink_event_group, TASK_DONE_BIT);
-    
+
     led_err = led_strip_clear(led_strip);
-    if (led_err != ESP_OK) {
+    if (led_err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to clear LED strip: %s", esp_err_to_name(led_err));
     }
     ESP_LOGD(TAG, "BlinkTask finished, deleting task");
@@ -606,7 +652,8 @@ static void configure_led(void)
         .flags.with_dma = true,
     };
     esp_err_t err = led_strip_new_spi_device(&strip_config, &spi_config, &led_strip);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to create LED strip device: %s", esp_err_to_name(err));
         // Continue without LED functionality
     }
@@ -614,31 +661,34 @@ static void configure_led(void)
 
 static void reset_counter(void)
 {
-    //const char *nvs_namespace = "pulsecnt";
+    // const char *nvs_namespace = "pulsecnt";
     const char *count_key = "count";
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return;
     }
-    
+
     uint32_t pulse_count = 0;
     uint32_t timer_count = 0;
-    
+
     err = nvs_set_u32(handle, count_key, pulse_count);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to write pulse count to NVS: %s", esp_err_to_name(err));
         nvs_close(handle);
         return;
     }
-    
+
     err = nvs_commit(handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to commit changes to NVS: %s", esp_err_to_name(err));
     }
-    
+
     nvs_close(handle);
 }
 
@@ -657,14 +707,15 @@ static void test_for_garbage_bytes(const uint8_t *buf, size_t len)
     {
         garbage_error_counter++;
         ESP_LOGW(TAG, "Garbage bytes detected at start of message (%d bytes):", (int)i);
-        
+
         // Create a buffer for the hex string
-        char hex_str[i*3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
-        for (size_t j = 0; j < i; ++j) {
-            sprintf(hex_str + j*3, "%02X ", buf[j]);
+        char hex_str[i * 3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
+        for (size_t j = 0; j < i; ++j)
+        {
+            sprintf(hex_str + j * 3, "%02X ", buf[j]);
         }
         ESP_LOGW(TAG, "GARBAGE HEX: %s", hex_str);
-        
+
         ESP_LOGW(TAG, "Total garbage errors so far: %d", garbage_error_counter);
     }
     message_counter++;
@@ -677,9 +728,10 @@ static void test_for_garbage_bytes(const uint8_t *buf, size_t len)
 static void print_buffer_hex(const uint8_t *buf, size_t len)
 {
     // Create a buffer for the hex string
-    char hex_str[len*3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
-    for (size_t i = 0; i < len; i++) {
-        sprintf(hex_str + i*3, "%02X ", buf[i]);
+    char hex_str[len * 3 + 1]; // Each byte becomes 2 hex chars + 1 space + null terminator
+    for (size_t i = 0; i < len; i++)
+    {
+        sprintf(hex_str + i * 3, "%02X ", buf[i]);
     }
     ESP_LOGD(TAG, "HEX: %s", hex_str);
 }
@@ -705,8 +757,8 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
     }
     snprintf(elapsed_time_str, sizeof(elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
     ESP_LOGI(TAG, "MessageID: %u", messageID);
-    payload.messageID = messageID; // Use messageID from NVS
-    increment_and_store_messageId(&messageID); // Increment and store new messageID in NVS
+    payload.messageID = messageID;                // Use messageID from NVS
+    increment_and_store_messageId(&messageID);    // Increment and store new messageID in NVS
     payload.lora_eventID = LORA_EVENT_ID_DEFAULT; // Example event ID, change as needed
     payload.elapsed_time_ms = elapsed_ms;
     payload.pulse_count = pulse_count;
@@ -718,13 +770,14 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
              (unsigned long)payload.pulse_count,
              (unsigned long)payload.messageID,
              payload.checksum);
-   ESP_LOGD(TAG, "Send counter: %lu", (unsigned long)payload.messageID);
-   ESP_LOGD(TAG, "Checksum: 0x%04X", payload.checksum);
-   esp_err_t err = e32_send_data((uint8_t *)&payload, sizeof(payload));
-   if (err != ESP_OK) {
-       ESP_LOGE(TAG, "Failed to send LoRa message: %s", esp_err_to_name(err));
-       // Continue execution, as this is a non-critical error
-   }
+    ESP_LOGD(TAG, "Send counter: %lu", (unsigned long)payload.messageID);
+    ESP_LOGD(TAG, "Checksum: 0x%04X", payload.checksum);
+    esp_err_t err = e32_send_data((uint8_t *)&payload, sizeof(payload));
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to send LoRa message: %s", esp_err_to_name(err));
+        // Continue execution, as this is a non-critical error
+    }
 }
 
 static void receive_lora_message()
@@ -771,11 +824,12 @@ static void receive_lora_message()
     {
         // Create a buffer for the message
         char msg_buf[total_received + 1];
-        for (size_t i = 0; i < total_received; i++) {
+        for (size_t i = 0; i < total_received; i++)
+        {
             msg_buf[i] = rx_buffer[i];
         }
         msg_buf[total_received] = '\0';
-        
+
         ESP_LOGI(TAG, "Received message: %s", msg_buf);
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
@@ -785,11 +839,12 @@ static void receive_lora_message()
     {
         // Create a buffer for the message
         char msg_buf[total_received + 1];
-        for (size_t i = 0; i < total_received; i++) {
+        for (size_t i = 0; i < total_received; i++)
+        {
             msg_buf[i] = rx_buffer[i];
         }
         msg_buf[total_received] = '\0';
-        
+
         ESP_LOGI(TAG, "Partial message received (no terminator): %s", msg_buf);
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
@@ -837,22 +892,25 @@ void increment_and_store_messageId(uint16_t *messageID)
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(nvs_namespace, NVS_READWRITE, &handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return;
     }
-    
+
     err = nvs_set_u16(handle, "messageID", *messageID);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to write messageID to NVS: %s", esp_err_to_name(err));
         nvs_close(handle);
         return;
     }
-    
+
     err = nvs_commit(handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to commit changes to NVS: %s", esp_err_to_name(err));
     }
-    
+
     nvs_close(handle);
 }
