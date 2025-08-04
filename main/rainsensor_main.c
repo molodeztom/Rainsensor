@@ -61,7 +61,8 @@ RainSensor
   20250803  V0.9.23         Remove unused debug calculations when in release mode
   20250803  V0.9.24         Add Kconfig option to enable/disable debug output, move main receive lora messsage functionality to E32_Lora_Lib
   20250803  V0.9.25         Add version number to E32_Lora_Lib.h and E32_Lora_Lib.c, use it in initLibrary
-  20240803  V0.9.26         remove unused variables, use e32_lora_lib_get_version() to get version number, replace deprecated "driver/rtc_cntl.h"
+  20250803  V0.9.26         remove unused variables, use e32_lora_lib_get_version() to get version number, replace deprecated "driver/rtc_cntl.h"
+  20250804  V0.9.27         Restructure app_main to make it more readable. 
   */
 
 /*
@@ -103,6 +104,13 @@ When disabled, the detailed debug output in the update_timer_count function will
 // =====================
 // Application Parameters
 // =====================
+
+// Use the version number extracted from Git tags if available, otherwise use a default
+#ifdef APP_VERSION_NUMBER
+#define RAINSENSOR_VERSION "V " APP_VERSION_NUMBER
+#else
+#define RAINSENSOR_VERSION "V0.9.27"
+#endif
 
 // LoRa communication parameters
 #define LORA_RX_BUFFER_SIZE 128    // Buffer size for received LoRa messages
@@ -173,6 +181,7 @@ static void test_for_garbage_bytes(const uint8_t *buf, size_t len);
 static void init_ulp_program(void);
 static void update_timer_count(void);
 static void configure_led(void);
+static void initialize_led(void);
 static void update_pulse_count(void);
 static void reset_counter(void);
 static void BlinkTask(void *arg);
@@ -185,159 +194,147 @@ static void receive_lora_message(void);
 static uint16_t read_messageId_fromNVS();
 static void increment_and_store_messageId(uint16_t *messageId);
 static void task_delay_callback(uint32_t ms);
+static void handle_ulp_wakeup(uint32_t *pulse_count, uint32_t *ms, int *hours, int *minutes, int *seconds);
+static void handle_normal_startup(void);
+static void prepare_for_deep_sleep(void);
+static bool initialize_system(void);
+static void initialize_led(void);
+static void handle_normal_startup(void);
+static void handle_ulp_wakeup(uint32_t *pulse_count, uint32_t *ms, int *hours, int *minutes, int *seconds);
+static void prepare_for_deep_sleep(void);
 
 static const char *TAG = "rainsens";
 
-// Use the version number extracted from Git tags if available, otherwise use a default
-#ifdef APP_VERSION_NUMBER
-#define RAINSENSOR_VERSION "V " APP_VERSION_NUMBER
-#else
-#define RAINSENSOR_VERSION "V0.9.26"
-#endif
+
 
 static led_strip_handle_t led_strip;
 
+// Forward declarations for helper functions
+
+
 void app_main(void)
 {
-    /* If user is using USB-serial-jtag then idf monitor needs some time to
+    uint32_t ms = 0;
+    int hours = 0, minutes = 0, seconds = 0;
+       /* If user is using USB-serial-jtag then idf monitor needs some time to
      *  re-connect to the USB port. We wait 1 sec here to allow for it to make the reconnection
      *  before we print anything. Otherwise the chip will go back to sleep again before the user
      *  has time to monitor any output.
      */
-    uint32_t ms = 0;
-    int hours = 0, minutes = 0, seconds = 0;
-    //static uint16_t msg_id = 0; // Message ID for LoRa messages
     TaskHandle_t xBlinkTask = NULL;
-    esp_err_t led_err = ESP_OK; // Define led_err once at the beginning of the function
     vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
 
-    // Configure log levels for all components
-    esp_log_level_set("*", ESP_LOG_INFO);           // Default level for all components
-    esp_log_level_set(TAG, ESP_LOG_INFO);           // Level for this component
-    esp_log_level_set("LORA_LIB", ESP_LOG_INFO);    // Level for LoRa library
-    esp_log_level_set("gpio", ESP_LOG_ERROR);    // Specifically silence GPIO messages
-
-   // ESP_LOGI(TAG, "Rainsensor %s", RAINSENSOR_VERSION);
-    ESP_LOGI(TAG, "Rainsensor Firmware Version: %s", APP_VERSION);
-    ESP_LOGI(TAG, "E32_Lora_Lib version: %s", e32_lora_lib_get_version());
-    //ESP_LOGI(TAG, "E32_Lora_Lib git version: %s", E32_LORA_LIB_GIT_VERSION);
-
-    e32_config_t config; // E32 configuration structure
-  //  uint8_t rx_buffer[128];
-   // size_t received = 0;
-    initLibrary();
-    e32_init_config(&config); // initialize E32 configuration structure
-    esp_err_t err = nvs_flash_init();
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to initialize NVS flash: %s", esp_err_to_name(err));
-        // This is critical, so we should return
+    if (!initialize_system()) {
         return;
     }
-
-    err = esp_sleep_enable_ulp_wakeup();
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to enable ULP wakeup: %s", esp_err_to_name(err));
-        // This is critical, so we should return
-        return;
-    }
-
-    config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;    // set transmission power to 30 dBm
-    config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS; // set wakeup time to 250ms
-    config.OPTION.fec = FEC_ENABLE;
-    config.CHAN = LORA_CHANNEL_DEFAULT; // set channel to 6 (902.875MHz)
-    sendConfiguration(&config);         // E32 configuration structure
-    // Note: sendConfiguration doesn't return an error code
-
-    vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB)); // wait for command to be processed
-
-    blink_event_group = xEventGroupCreate(); // Create the event group for task synchronization
-    if (blink_event_group == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to create event group");
-        return;
-    }
-    // int send_counter = 1;
     uint32_t pulse_count = 0;
 
-    /* Initialize NVS */
-
-    /* Configure the peripheral according to the LED type */
-    configure_led();
-    led_err = led_strip_set_pixel(led_strip, 0, LED_COLOR_GREEN_R, LED_COLOR_GREEN_G, LED_COLOR_GREEN_B);
-    if (led_err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to set LED pixel: %s", esp_err_to_name(led_err));
-    }
-
-    /* Refresh the strip to send data */
-    led_err = led_strip_refresh(led_strip);
-    if (led_err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
-    }
+    /* Initialize LED */
+    initialize_led();
 
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_ULP)
     {
-        ESP_LOGD(TAG, "Not ULP wakeup, initializing ULP");
-        init_ulp_program();
-        // TODO: change use lora_send_message (add an event code to  struct first)
-        const char *message = "Rainsensor initialized";
-        size_t message_length = strlen(message) + 1; // Include null terminator
-        esp_err_t result = e32_send_data((uint8_t *)message, message_length);
-        // Check if the transmission was successful
-        if (result == ESP_OK)
-        {
-            ESP_LOGD(TAG, "Initialization message sent successfully.");
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to send initialization message: %s", esp_err_to_name(result));
-        }
+        handle_normal_startup();
     }
     else
     {
-        ESP_LOGD(TAG, "ULP wakeup, saving pulse count");
-        update_timer_count();
-        update_pulse_count();
-        // Read updated pulse_count from NVS
-        nvs_handle_t handle;
-        esp_err_t err = nvs_open(nvs_namespace, NVS_READONLY, &handle);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
-            // Continue with pulse_count = 0 as fallback
-        }
-        else
-        {
-            err = nvs_get_u32(handle, "count", &pulse_count);
-            if (err != ESP_OK)
-            {
-                ESP_LOGE(TAG, "Failed to read pulse count from NVS: %s", esp_err_to_name(err));
-                // Continue with pulse_count = 0 as fallback
-            }
-            nvs_close(handle);
-        }
-        // Calculate elapsed time for payload
-        // After update_timer_count(), ms/hours/minutes/seconds are set
-        ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
-        format_time(ms, &hours, &minutes, &seconds);
-        xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
-        xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for the task to finish
-
-        // Use ulp_timer_count as send_counter since timer_count is undeclared
-        send_lora_message(pulse_count, hours, minutes, seconds, ms, (uint32_t)ulp_timer_count);
-        receive_lora_message();
+        handle_ulp_wakeup(&pulse_count, &ms, &hours, &minutes, &seconds);
     }
 
-    // ... process answer or timeout ...
+    prepare_for_deep_sleep();
+}
+
+static bool initialize_system(void)
+{
+    // Configure logging
+    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+    esp_log_level_set("LORA_LIB", ESP_LOG_INFO);
+    esp_log_level_set("gpio", ESP_LOG_ERROR);
+
+    ESP_LOGI(TAG, "Rainsensor Firmware Version: %s", APP_VERSION);
+    ESP_LOGI(TAG, "E32_Lora_Lib version: %s", e32_lora_lib_get_version());
+
+    // Initialize components
+    if (nvs_flash_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize NVS flash");
+        return false;
+    }
+
+    if (esp_sleep_enable_ulp_wakeup() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable ULP wakeup");
+        return false;
+    }
+
+    // Initialize LoRa
+    e32_config_t config;
+    initLibrary();
+    e32_init_config(&config);
+    config.OPTION.transmissionPower = TRANSMISSION_POWER_21dBm;
+    config.OPTION.wirelessWakeupTime = WIRELESS_WAKEUP_TIME_500MS;
+    config.OPTION.fec = FEC_ENABLE;
+    config.CHAN = LORA_CHANNEL_DEFAULT;
+    sendConfiguration(&config);
+     // Note: sendConfiguration doesn't return an error code
+    vTaskDelay(pdMS_TO_TICKS(WAIT_FOR_PROCESSING_LIB));
+
+    blink_event_group = xEventGroupCreate();
+    if (blink_event_group == NULL) {
+        ESP_LOGE(TAG, "Failed to create event group");
+        return false;
+    }
+
+    return true;
+}
+
+static void handle_ulp_wakeup(uint32_t *pulse_count, uint32_t *ms, int *hours, int *minutes, int *seconds)
+{
+    ESP_LOGD(TAG, "ULP wakeup, saving pulse count");
+    update_timer_count();
+    update_pulse_count();
+    
+    // Read pulse count from NVS
+    nvs_handle_t handle;
+    if (nvs_open(nvs_namespace, NVS_READONLY, &handle) == ESP_OK) {
+        nvs_get_u32(handle, "count", pulse_count);
+        nvs_close(handle);
+    }
+
+    // Calculate elapsed time
+    *ms = calculate_time_ms(((uint64_t)ulp_timer_count_high << 32) | ((uint32_t)ulp_timer_count_low_h << 16));
+    format_time(*ms, hours, minutes, seconds);
+    
+    // Blink LED and send LoRa message
+    TaskHandle_t xBlinkTask = NULL;
+    xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
+    xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    
+    send_lora_message(*pulse_count, *hours, *minutes, *seconds, *ms, (uint32_t)ulp_timer_count);
+    receive_lora_message();
+}
+
+static void handle_normal_startup(void)
+{
+    ESP_LOGD(TAG, "Not ULP wakeup, initializing ULP");
+    init_ulp_program();
+    
+    const char *message = "Rainsensor initialized";
+    esp_err_t result = e32_send_data((uint8_t *)message, strlen(message) + 1);
+    if (result == ESP_OK) {
+        ESP_LOGD(TAG, "Initialization message sent successfully.");
+    } else {
+        ESP_LOGE(TAG, "Failed to send initialization message: %s", esp_err_to_name(result));
+    }
+}
+
+static void prepare_for_deep_sleep(void)
+{
     // Optional: sleep before next cycle
     vTaskDelay(pdMS_TO_TICKS(SHUTDOWN_DELAY_MS));
 
     ESP_LOGI(TAG, "Entering deep sleep");
-    led_err = led_strip_clear(led_strip);
+    esp_err_t led_err = led_strip_clear(led_strip);
     if (led_err != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to clear LED strip: %s", esp_err_to_name(led_err));
@@ -655,6 +652,24 @@ static void BlinkTask(void *arg)
     }
     ESP_LOGD(TAG, "BlinkTask finished, deleting task");
     vTaskDelete(NULL);
+}
+
+static void initialize_led(void)
+{
+    /* Configure the peripheral according to the LED type */
+    configure_led();
+    esp_err_t led_err = led_strip_set_pixel(led_strip, 0, LED_COLOR_GREEN_R, LED_COLOR_GREEN_G, LED_COLOR_GREEN_B);
+    if (led_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set LED pixel: %s", esp_err_to_name(led_err));
+    }
+
+    /* Refresh the strip to send data */
+    led_err = led_strip_refresh(led_strip);
+    if (led_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to refresh LED strip: %s", esp_err_to_name(led_err));
+    }
 }
 
 static void configure_led(void)
