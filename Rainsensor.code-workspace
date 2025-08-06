@@ -9,5 +9,10 @@
 			"ulp_main.h": "c",
 			"task.h": "c"
 		}
+	},
+	"extensions": {
+		"recommendations": [
+			"kilocode.kilo-code"
+		]
 	}
 }

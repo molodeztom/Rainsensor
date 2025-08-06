@@ -63,6 +63,7 @@ RainSensor
   20250803  V0.9.25         Add version number to E32_Lora_Lib.h and E32_Lora_Lib.c, use it in initLibrary
   20250803  V0.9.26         remove unused variables, use e32_lora_lib_get_version() to get version number, replace deprecated "driver/rtc_cntl.h"
   20250804  V0.9.27         Restructure app_main to make it more readable. 
+  20250804  V0.9.28         Test receive a struct with checksum, not using terminator because we have a fixed size message
   */
 
 /*
@@ -114,7 +115,7 @@ When disabled, the detailed debug output in the update_timer_count function will
 
 // LoRa communication parameters
 #define LORA_RX_BUFFER_SIZE 128    // Buffer size for received LoRa messages
-#define LORA_REPLY_TIMEOUT_MS 5000 // Timeout (ms) to wait for a reply after sending a message
+#define LORA_REPLY_TIMEOUT_MS 8000 // Timeout (ms) to wait for a reply after sending a message
 #define LORA_RECEIVE_POLL_MS 200   // Polling interval (ms) when waiting for a reply
 
 // LoRa configuration constants
@@ -221,7 +222,7 @@ void app_main(void)
      *  before we print anything. Otherwise the chip will go back to sleep again before the user
      *  has time to monitor any output.
      */
-    TaskHandle_t xBlinkTask = NULL;
+
     vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
 
     if (!initialize_system()) {
@@ -249,8 +250,8 @@ static bool initialize_system(void)
 {
     // Configure logging
     esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set(TAG, ESP_LOG_INFO);
-    esp_log_level_set("LORA_LIB", ESP_LOG_INFO);
+    esp_log_level_set(TAG, ESP_LOG_DEBUG);
+    esp_log_level_set("LORA_LIB", ESP_LOG_DEBUG);
     esp_log_level_set("gpio", ESP_LOG_ERROR);
 
     ESP_LOGI(TAG, "Rainsensor Firmware Version: %s", APP_VERSION);
@@ -309,9 +310,17 @@ static void handle_ulp_wakeup(uint32_t *pulse_count, uint32_t *ms, int *hours, i
     TaskHandle_t xBlinkTask = NULL;
     xTaskCreate(BlinkTask, "blink_task", 4096, NULL, 5, &xBlinkTask);
     xEventGroupWaitBits(blink_event_group, TASK_DONE_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    
-    send_lora_message(*pulse_count, *hours, *minutes, *seconds, *ms, (uint32_t)ulp_timer_count);
-    receive_lora_message();
+    //send data to lora WLAN bridge until message is acknowledged
+    bool msgAck = false; 
+    int numRetry = 0;
+    #define numRetryMax 2
+
+    while((msgAck == false) && (numRetry <= numRetryMax)){
+        send_lora_message(*pulse_count, *hours, *minutes, *seconds, *ms, (uint32_t)ulp_timer_count);
+        receive_lora_message();
+        msgAck = true;
+    }
+
 }
 
 static void handle_normal_startup(void)
@@ -793,7 +802,6 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
     snprintf(elapsed_time_str, sizeof(elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
     ESP_LOGI(TAG, "MessageID: %u", messageID);
     payload.messageID = messageID;                // Use messageID from NVS
-    increment_and_store_messageId(&messageID);    // Increment and store new messageID in NVS
     payload.lora_eventID = LORA_EVENT_ID_DEFAULT; // Example event ID, change as needed
     payload.elapsed_time_ms = elapsed_ms;
     payload.pulse_count = pulse_count;
@@ -813,6 +821,7 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
         ESP_LOGE(TAG, "Failed to send LoRa message: %s", esp_err_to_name(err));
         // Continue execution, as this is a non-critical error
     }
+      increment_and_store_messageId(&messageID);    // Increment and store new messageID in NVS
 }
 
 /**
@@ -844,32 +853,34 @@ static void receive_lora_message(void)
     uint8_t rx_buffer[LORA_RX_BUFFER_SIZE];
     size_t total_received = 0;
     esp_err_t err = ESP_OK;
+    ESP_LOGD(TAG, "receive message");
     
     // Initial delay before starting to receive
     vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_DELAY_MS));
     
-    // Use the library function to receive a message with terminator
-    err = e32_receive_message_with_terminator(
+    // Use the library function to receive a message 
+    err = e32_receive_message(
         rx_buffer,
         LORA_RX_BUFFER_SIZE,
         &total_received,
-        LORA_MESSAGE_TERMINATOR,
         LORA_REPLY_TIMEOUT_MS,
         LORA_RECEIVE_POLL_MS,
         task_delay_callback
     );
     
     // Process the received message based on the result
-    bool got_terminator = (err == ESP_OK && total_received > 0);
+    /* bool got_terminator = (err == ESP_OK && total_received > 0);
     for (size_t i = 0; i < total_received; i++) {
         if (rx_buffer[i] == LORA_MESSAGE_TERMINATOR) {
             got_terminator = true;
             break;
         }
-    }
+    } */
     // Process the received message
     if (total_received > 0)
     {
+        
+          ESP_LOGD(TAG, "copy message");
         // Create a buffer for the message
         char msg_buf[total_received + 1];
         for (size_t i = 0; i < total_received; i++)
@@ -878,18 +889,38 @@ static void receive_lora_message(void)
         }
         msg_buf[total_received] = '\0';
 
-        if (got_terminator)
-        {
+/*         if (got_terminator)
+        { */
             ESP_LOGI(TAG, "Received message: %s", msg_buf);
-        }
+/*         }
         else
         {
             ESP_LOGI(TAG, "Partial message received (no terminator): %s", msg_buf);
         }
-        
+         */
         print_buffer_hex(rx_buffer, total_received);
         // Test for garbage bytes at start
-        test_for_garbage_bytes(rx_buffer, total_received);
+        //test_for_garbage_bytes(rx_buffer, total_received); Now we   receive binary data!
+//New payload handler load ID and event in a structure
+// Copy buffer into struct
+    lora_payload_t payload;
+    memcpy(&payload, rx_buffer, sizeof(lora_payload_t));
+    // Validate checksum
+    uint16_t calc_checksum = lora_payload_checksum(&payload);
+    bool checksum_ok = (calc_checksum == payload.checksum);
+ // Print all fields
+
+     ESP_LOGD(TAG,"Received Payload: ms %lu, pulses %lu, messageID %lu, eventID %lu, checksum 0x%04X",
+             (unsigned long)payload.elapsed_time_ms,
+             (unsigned long)payload.pulse_count,
+             (unsigned long)payload.messageID,
+             (unsigned long)payload.lora_eventID,
+             payload.checksum);
+  
+    ESP_LOGD(TAG, "Calc Checksum: 0x%04X", calc_checksum);
+ 
+
+
     }
     else
     {
