@@ -91,6 +91,7 @@ When disabled, the detailed debug output in the update_timer_count function will
 #include "led_strip.h"
 // #include "esp_intr_alloc.h"
 #include "driver/gpio.h"
+#include "esp_system.h"
 
 /* Old deprecated include - kept for reference */
 // #include "driver/rtc_cntl.h"
@@ -794,9 +795,10 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
     uint16_t messageID = 0;
     messageID = read_messageId_fromNVS();
     lora_payload_t payload;
-    if (sizeof(lora_payload_t) > LORA_MAX_PAYLOAD_SIZE)
+    if (sizeof(lora_payload_t) > LORA_MAX_PAYLOAD_SIZE - 2) // Account for delimiter
     {
-        ESP_LOGE(TAG, "ERROR: lora_payload_t size (%u bytes) exceeds LoRa E32 max payload size (%u bytes). Not sending!", (unsigned)sizeof(lora_payload_t), (unsigned)LORA_MAX_PAYLOAD_SIZE);
+        ESP_LOGE(TAG, "ERROR: lora_payload_t size (%u bytes) exceeds LoRa E32 max payload size (%u bytes). Not sending!",
+                (unsigned)sizeof(lora_payload_t), (unsigned)(LORA_MAX_PAYLOAD_SIZE - 2));
         return;
     }
     snprintf(elapsed_time_str, sizeof(elapsed_time_str), "%02d:%02d:%02d", hours, minutes, seconds);
@@ -815,13 +817,15 @@ void send_lora_message(uint32_t pulse_count, int hours, int minutes, int seconds
              payload.checksum);
     ESP_LOGD(TAG, "Send counter: %lu", (unsigned long)payload.messageID);
     ESP_LOGD(TAG, "Checksum: 0x%04X", payload.checksum);
-    esp_err_t err = e32_send_data((uint8_t *)&payload, sizeof(payload));
+    
+    // Use the new function to send with delimiter
+    esp_err_t err = e32_send_message_with_delimiter((uint8_t *)&payload, sizeof(payload));
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to send LoRa message: %s", esp_err_to_name(err));
         // Continue execution, as this is a non-critical error
     }
-      increment_and_store_messageId(&messageID);    // Increment and store new messageID in NVS
+    increment_and_store_messageId(&messageID);    // Increment and store new messageID in NVS
 }
 
 /**
@@ -858,7 +862,8 @@ static void receive_lora_message(void)
     // Initial delay before starting to receive
     vTaskDelay(pdMS_TO_TICKS(LORA_RECEIVE_DELAY_MS));
     
-    // Use the library function to receive a message 
+    // Use the enhanced function to receive a message with delimiter
+    uint32_t start_time = pdTICKS_TO_MS(xTaskGetTickCount()); // Get time in ms using FreeRTOS
     err = e32_receive_message(
         rx_buffer,
         LORA_RX_BUFFER_SIZE,
@@ -868,63 +873,39 @@ static void receive_lora_message(void)
         task_delay_callback
     );
     
-    // Process the received message based on the result
-    /* bool got_terminator = (err == ESP_OK && total_received > 0);
-    for (size_t i = 0; i < total_received; i++) {
-        if (rx_buffer[i] == LORA_MESSAGE_TERMINATOR) {
-            got_terminator = true;
-            break;
-        }
-    } */
+    uint32_t end_time = pdTICKS_TO_MS(xTaskGetTickCount()); // Get time in ms using FreeRTOS
+    ESP_LOGI(TAG, "Message reception took %u ms", (unsigned)(end_time - start_time));
+    
     // Process the received message
-    if (total_received > 0)
+    if (total_received > 0 && total_received >= sizeof(lora_payload_t))
     {
+        ESP_LOGD(TAG, "Received %u bytes, processing as lora_payload_t", (unsigned)total_received);
         
-          ESP_LOGD(TAG, "copy message");
-        // Create a buffer for the message
-        char msg_buf[total_received + 1];
-        for (size_t i = 0; i < total_received; i++)
-        {
-            msg_buf[i] = rx_buffer[i];
-        }
-        msg_buf[total_received] = '\0';
-
-/*         if (got_terminator)
-        { */
-            ESP_LOGI(TAG, "Received message: %s", msg_buf);
-/*         }
-        else
-        {
-            ESP_LOGI(TAG, "Partial message received (no terminator): %s", msg_buf);
-        }
-         */
+        // Copy buffer into struct
+        lora_payload_t payload;
+        memcpy(&payload, rx_buffer, sizeof(lora_payload_t));
+        
+        // Validate checksum
+        uint16_t calc_checksum = lora_payload_checksum(&payload);
+        bool checksum_ok = (calc_checksum == payload.checksum);
+        
+        // Print all fields
+        ESP_LOGD(TAG, "Received Payload: ms %lu, pulses %lu, messageID %lu, eventID %lu, checksum 0x%04X %s",
+                (unsigned long)payload.elapsed_time_ms,
+                (unsigned long)payload.pulse_count,
+                (unsigned long)payload.messageID,
+                (unsigned long)payload.lora_eventID,
+                payload.checksum,
+                checksum_ok ? "(valid)" : "(INVALID)");
+        
+        ESP_LOGD(TAG, "Calc Checksum: 0x%04X", calc_checksum);
+        
+        // Print hex representation for debugging
         print_buffer_hex(rx_buffer, total_received);
-        // Test for garbage bytes at start
-        //test_for_garbage_bytes(rx_buffer, total_received); Now we   receive binary data!
-//New payload handler load ID and event in a structure
-// Copy buffer into struct
-    lora_payload_t payload;
-    memcpy(&payload, rx_buffer, sizeof(lora_payload_t));
-    // Validate checksum
-    uint16_t calc_checksum = lora_payload_checksum(&payload);
-    bool checksum_ok = (calc_checksum == payload.checksum);
- // Print all fields
-
-     ESP_LOGD(TAG,"Received Payload: ms %lu, pulses %lu, messageID %lu, eventID %lu, checksum 0x%04X",
-             (unsigned long)payload.elapsed_time_ms,
-             (unsigned long)payload.pulse_count,
-             (unsigned long)payload.messageID,
-             (unsigned long)payload.lora_eventID,
-             payload.checksum);
-  
-    ESP_LOGD(TAG, "Calc Checksum: 0x%04X", calc_checksum);
- 
-
-
     }
     else
     {
-        ESP_LOGD(TAG, "No reply received within timeout");
+        ESP_LOGD(TAG, "No reply received or message too short (%u bytes)", (unsigned)total_received);
     }
 }
 
