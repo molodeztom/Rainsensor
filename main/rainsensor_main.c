@@ -88,7 +88,7 @@ When disabled, the detailed debug output in the update_timer_count function will
 #include "soc/rtc_periph.h"
 #include "ulp.h"
 #include "ulp_main.h"
-#include "led_strip.h"
+ #include "led_strip.h"
 // #include "esp_intr_alloc.h"
 #include "driver/gpio.h"
 #include "esp_system.h"
