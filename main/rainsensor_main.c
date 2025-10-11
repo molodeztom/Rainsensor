@@ -97,11 +97,13 @@ When disabled, the detailed debug output in the update_timer_count function will
 // #include "driver/rtc_cntl.h"
 
 /* New recommended includes for ESP-IDF v5.4.1+ */
+
 #include "esp_sleep.h"      // For sleep-related functions
 #include "driver/rtc_io.h"  // For RTC GPIO functions
 #include "esp_log.h"
 #include "E32_Lora_Lib.h"
-#include "../include/communication.h"
+#include "..\include\communication.h"
+
 
 // =====================
 // Application Parameters
@@ -124,6 +126,8 @@ When disabled, the detailed debug output in the update_timer_count function will
 #define LORA_EVENT_ID_DEFAULT 0x0001 // Default event ID
 #define LORA_MAX_PAYLOAD_SIZE 58     // E32-900T30D max payload size in bytes
 #define LORA_MESSAGE_TERMINATOR '!'  // Character that marks the end of a LoRa message
+#define E32_MSG_DELIMITER_1 0x0C    // First byte of message delimiter
+#define E32_MSG_DELIMITER_2 0x0C    // Second byte of message delimiter
 
 // Buffer and formatting constants
 #define HEX_CHARS_PER_BYTE 3  // Each byte becomes 2 hex chars + 1 space in string representation

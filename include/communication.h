@@ -8,6 +8,9 @@
 // elapsed_time_str: formatted as "hh:mm:ss" (8 chars + null terminator)
 // checksum: sum of all bytes except checksum field
 
+
+
+
 typedef struct __attribute__((packed)) {
     char elapsed_time_str[9];      // "hh:mm:ss" + '\0'
     uint32_t elapsed_time_ms;      // Elapsed time in ms
