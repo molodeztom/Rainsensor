@@ -11,5 +11,6 @@
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3"
   },
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.currentSetup": "C:\\Users\\Thomas\\esp\\v5.4.1\\esp-idf"
 }

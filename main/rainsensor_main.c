@@ -136,7 +136,7 @@ When disabled, the detailed debug output in the update_timer_count function will
 #define STARTUP_DELAY_MS 1000      // Delay at startup to allow monitor reconnection
 #define SHUTDOWN_DELAY_MS 4000     // Delay before entering deep sleep
 #define LED_BLINK_INTERVAL_MS 500  // Interval between LED color changes
-#define LORA_RECEIVE_DELAY_MS 2000 // Delay before waiting for LoRa reply
+#define LORA_RECEIVE_DELAY_MS 6000 // Delay before waiting for LoRa reply
 #define MS_PER_SECOND 1000         // Milliseconds in a second
 #define MS_PER_MINUTE 60000        // Milliseconds in a minute
 #define MS_PER_HOUR 3600000        // Milliseconds in an hour
