@@ -28,8 +28,13 @@ typedef struct __attribute__((packed)) {
 } lora_payload_t;
 
 /*
-Event IDs
+Event IDs for lora_eventID field
+Receiver return message events:
 */
+#define LORA_EVENT_RESUME_SLEEP_MODE    0x0001  // Received message: resume normal sleep mode (allow deep sleep)
+#define LORA_EVENT_DISABLE_SLEEP_MODE   0x0002  // Received message: disable sleep mode (stay awake)
+#define LORA_EVENT_SEND_LORA_PARAMS     0x0003  // Received message: send LORA parameters
+#define LORA_EVENT_SEND_PROG_PARAMS     0x0004  // Received message: send program parameters
 
 // Calculate checksum (simple sum of bytes, excluding checksum field)
 static inline uint16_t lora_payload_checksum(const lora_payload_t *payload) {

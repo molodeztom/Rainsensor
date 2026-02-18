@@ -211,7 +211,8 @@ static void prepare_for_deep_sleep(void);
 
 static const char *TAG = "rainsens";
 
-
+// Global flag to control deep sleep behavior
+static bool skip_deep_sleep = false;
 
 static led_strip_handle_t led_strip;
 
@@ -344,6 +345,23 @@ static void handle_normal_startup(void)
 
 static void prepare_for_deep_sleep(void)
 {
+    // Check if deep sleep should be skipped
+    if (skip_deep_sleep)
+    {
+        ESP_LOGI(TAG, "Sleep mode disabled (LORA_EVENT_DISABLE_SLEEP_MODE) - staying awake");
+        // Keep the system running - wait for next command
+        // The flag will remain true until LORA_EVENT_RESUME_SLEEP_MODE is received
+        while (skip_deep_sleep)
+        {
+            ESP_LOGD(TAG, "Waiting for LORA_EVENT_RESUME_SLEEP_MODE command...");
+            // Wait and check for incoming messages
+            receive_lora_message();
+            // Delay between checks to avoid busy-waiting
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+        ESP_LOGI(TAG, "Sleep mode resumed (LORA_EVENT_RESUME_SLEEP_MODE) - proceeding to deep sleep");
+    }
+    
     // Optional: sleep before next cycle
     vTaskDelay(pdMS_TO_TICKS(SHUTDOWN_DELAY_MS));
 
@@ -906,6 +924,41 @@ static void receive_lora_message(void)
         
         // Print hex representation for debugging
         print_buffer_hex(rx_buffer, total_received);
+        
+        // Evaluate event ID and handle accordingly
+        if (checksum_ok)
+        {
+            switch (payload.lora_eventID)
+            {
+                case LORA_EVENT_DISABLE_SLEEP_MODE:
+                    ESP_LOGI(TAG, "Received LORA_EVENT_DISABLE_SLEEP_MODE - disabling sleep mode");
+                    skip_deep_sleep = true;
+                    break;
+                    
+                case LORA_EVENT_RESUME_SLEEP_MODE:
+                    ESP_LOGI(TAG, "Received LORA_EVENT_RESUME_SLEEP_MODE - resuming sleep mode");
+                    skip_deep_sleep = false;
+                    break;
+                    
+                case LORA_EVENT_SEND_LORA_PARAMS:
+                    ESP_LOGI(TAG, "Received LORA_EVENT_SEND_LORA_PARAMS - not yet implemented");
+                    // TODO: Implement sending LORA parameters
+                    break;
+                    
+                case LORA_EVENT_SEND_PROG_PARAMS:
+                    ESP_LOGI(TAG, "Received LORA_EVENT_SEND_PROG_PARAMS - not yet implemented");
+                    // TODO: Implement sending program parameters
+                    break;
+                    
+                default:
+                    ESP_LOGW(TAG, "Received unknown event ID: 0x%04X", payload.lora_eventID);
+                    break;
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Checksum validation failed - ignoring event ID");
+        }
     }
     else
     {
