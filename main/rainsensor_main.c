@@ -246,7 +246,25 @@ void app_main(void)
     }
     else
     {
-        handle_ulp_wakeup(&pulse_count, &ms, &hours, &minutes, &seconds);
+        // Main loop: handle ULP wakeups until deep sleep is requested
+        while (true)
+        {
+            handle_ulp_wakeup(&pulse_count, &ms, &hours, &minutes, &seconds);
+            
+            // Check if deep sleep should be skipped
+            if (skip_deep_sleep)
+            {
+                ESP_LOGI(TAG, "Sleep mode disabled - staying awake, waiting for next ULP wakeup or LORA_EVENT_RESUME_SLEEP_MODE");
+                // Reset pulse count for next cycle
+                pulse_count = 0;
+                // Continue loop to handle next ULP wakeup
+            }
+            else
+            {
+                // Deep sleep requested, exit loop
+                break;
+            }
+        }
     }
 
     prepare_for_deep_sleep();
@@ -345,23 +363,6 @@ static void handle_normal_startup(void)
 
 static void prepare_for_deep_sleep(void)
 {
-    // Check if deep sleep should be skipped
-    if (skip_deep_sleep)
-    {
-        ESP_LOGI(TAG, "Sleep mode disabled (LORA_EVENT_DISABLE_SLEEP_MODE) - staying awake");
-        // Keep the system running - wait for next command
-        // The flag will remain true until LORA_EVENT_RESUME_SLEEP_MODE is received
-        while (skip_deep_sleep)
-        {
-            ESP_LOGD(TAG, "Waiting for LORA_EVENT_RESUME_SLEEP_MODE command...");
-            // Wait and check for incoming messages
-            receive_lora_message();
-            // Delay between checks to avoid busy-waiting
-            vTaskDelay(pdMS_TO_TICKS(5000));
-        }
-        ESP_LOGI(TAG, "Sleep mode resumed (LORA_EVENT_RESUME_SLEEP_MODE) - proceeding to deep sleep");
-    }
-    
     // Optional: sleep before next cycle
     vTaskDelay(pdMS_TO_TICKS(SHUTDOWN_DELAY_MS));
 
