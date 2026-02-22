@@ -64,6 +64,9 @@ RainSensor
   20250803  V0.9.26         remove unused variables, use e32_lora_lib_get_version() to get version number, replace deprecated "driver/rtc_cntl.h"
   20250804  V0.9.27         Restructure app_main to make it more readable. 
   20250804  V0.9.28         Test receive a struct with checksum, not using terminator because we have a fixed size message
+  20260221  V0.9.29         Receive events to control sleep mode
+  20260221  V0.9.30         Implement receive parameters Phase 1
+  20260621  V0.9.31         Implement receive parameters Phase 2
   */
 
 /*
@@ -113,7 +116,7 @@ When disabled, the detailed debug output in the update_timer_count function will
 #ifdef APP_VERSION_NUMBER
 #define RAINSENSOR_VERSION "V " APP_VERSION_NUMBER
 #else
-#define RAINSENSOR_VERSION "V0.9.27"
+#define RAINSENSOR_VERSION "V0.9.31"
 #endif
 
 // LoRa communication parameters
@@ -154,7 +157,7 @@ When disabled, the detailed debug output in the update_timer_count function will
 
 // LED and ULP parameters
 #define BLINK_GPIO CONFIG_BLINK_GPIO              // GPIO for addressable LED strip
-#define ulp_wakeup_period 1000                    // ULP wakeup period in ms
+//#define ulp_wakeup_period 1000                    // ULP wakeup period in ms
 static const double wakeup_interval_seconds = 60; // Time to wake CPU if at least one input pulse detected
 #define RTC_SLOW_CLK_FREQ 136000                  // RTC slow clock frequency (internal 136 kHz oscillator)
 // #define RTC_SLOW_CLK_FREQ 68359   // RTC slow clock frequency (17.5 MHz oscillator / 256)
@@ -208,11 +211,31 @@ static void initialize_led(void);
 static void handle_normal_startup(void);
 static void handle_ulp_wakeup(uint32_t *pulse_count, uint32_t *ms, int *hours, int *minutes, int *seconds);
 static void prepare_for_deep_sleep(void);
+static bool validate_config_parameter(uint8_t *value, uint8_t min, uint8_t max, uint8_t default_val);
+static bool validate_config_parameter_u16(uint16_t *value, uint16_t min, uint16_t max, uint16_t default_val);
+static void handle_set_config_event(const lora_config_payload_t *config);
+static void handle_reset_config_event(void);
 
 static const char *TAG = "rainsens";
 
 // Global flag to control deep sleep behavior
 static bool skip_deep_sleep = false;
+
+// Runtime configuration structure
+typedef struct {
+    uint8_t ulp_pulses_to_wake_up;
+    uint16_t wakeup_interval_sec;
+    uint16_t shutdown_delay_ms;
+    uint16_t lora_receive_delay_ms;
+} rainsensor_config_t;
+
+// Global configuration with default values
+static rainsensor_config_t rainsensor_config = {
+    .ulp_pulses_to_wake_up = CONFIG_DEFAULT_ULP_PULSES,
+    .wakeup_interval_sec = CONFIG_DEFAULT_WAKEUP_INTERVAL_SEC,
+    .shutdown_delay_ms = CONFIG_DEFAULT_SHUTDOWN_DELAY_MS,
+    .lora_receive_delay_ms = CONFIG_DEFAULT_LORA_RECEIVE_DELAY_MS,
+};
 
 static led_strip_handle_t led_strip;
 
@@ -447,7 +470,7 @@ static void init_ulp_program(void)
      * Minimum pulse width has to be T * (ulp_debounce_counter + 1) = 80ms.
      time in ms
      */
-    ulp_set_wakeup_period(0, ulp_wakeup_period);
+    //ulp_set_wakeup_period(0, ulp_wakeup_period);
 
     /* Start the program */
     err = ulp_run(&ulp_entry - RTC_SLOW_MEM);
@@ -927,39 +950,70 @@ static void receive_lora_message(void)
         print_buffer_hex(rx_buffer, total_received);
         
         // Evaluate event ID and handle accordingly
-        if (checksum_ok)
-        {
-            switch (payload.lora_eventID)
-            {
-                case LORA_EVENT_DISABLE_SLEEP_MODE:
-                    ESP_LOGI(TAG, "Received LORA_EVENT_DISABLE_SLEEP_MODE - disabling sleep mode");
-                    skip_deep_sleep = true;
-                    break;
-                    
-                case LORA_EVENT_RESUME_SLEEP_MODE:
-                    ESP_LOGI(TAG, "Received LORA_EVENT_RESUME_SLEEP_MODE - resuming sleep mode");
-                    skip_deep_sleep = false;
-                    break;
-                    
-                case LORA_EVENT_SEND_LORA_PARAMS:
-                    ESP_LOGI(TAG, "Received LORA_EVENT_SEND_LORA_PARAMS - not yet implemented");
-                    // TODO: Implement sending LORA parameters
-                    break;
-                    
-                case LORA_EVENT_SEND_PROG_PARAMS:
-                    ESP_LOGI(TAG, "Received LORA_EVENT_SEND_PROG_PARAMS - not yet implemented");
-                    // TODO: Implement sending program parameters
-                    break;
-                    
-                default:
-                    ESP_LOGW(TAG, "Received unknown event ID: 0x%04X", payload.lora_eventID);
-                    break;
-            }
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Checksum validation failed - ignoring event ID");
-        }
+         if (checksum_ok)
+         {
+             switch (payload.lora_eventID)
+             {
+                 case LORA_EVENT_DISABLE_SLEEP_MODE:
+                     ESP_LOGI(TAG, "Received LORA_EVENT_DISABLE_SLEEP_MODE - disabling sleep mode");
+                     skip_deep_sleep = true;
+                     break;
+                     
+                 case LORA_EVENT_RESUME_SLEEP_MODE:
+                     ESP_LOGI(TAG, "Received LORA_EVENT_RESUME_SLEEP_MODE - resuming sleep mode");
+                     skip_deep_sleep = false;
+                     break;
+                     
+                 case LORA_EVENT_SEND_LORA_PARAMS:
+                     ESP_LOGI(TAG, "Received LORA_EVENT_SEND_LORA_PARAMS - not yet implemented");
+                     // TODO: Implement sending LORA parameters
+                     break;
+                     
+                 case LORA_EVENT_SEND_PROG_PARAMS:
+                     ESP_LOGI(TAG, "Received LORA_EVENT_SEND_PROG_PARAMS - not yet implemented");
+                     // TODO: Implement sending program parameters
+                     break;
+                     
+                 case LORA_EVENT_SET_CONFIG:
+                     ESP_LOGI(TAG, "Received LORA_EVENT_SET_CONFIG");
+                     // Check if message is large enough for config payload
+                     if (total_received >= sizeof(lora_config_payload_t))
+                     {
+                         lora_config_payload_t config_payload;
+                         memcpy(&config_payload, rx_buffer, sizeof(lora_config_payload_t));
+                         
+                         // Validate config checksum
+                         uint16_t config_calc_checksum = lora_config_payload_checksum(&config_payload);
+                         if (config_calc_checksum == config_payload.checksum)
+                         {
+                             handle_set_config_event(&config_payload);
+                         }
+                         else
+                         {
+                             ESP_LOGW(TAG, "Config payload checksum invalid - ignoring");
+                         }
+                     }
+                     else
+                     {
+                         ESP_LOGW(TAG, "Config payload too short (%u bytes, expected %u)", 
+                                  (unsigned)total_received, (unsigned)sizeof(lora_config_payload_t));
+                     }
+                     break;
+                     
+                 case LORA_EVENT_RESET_CONFIG:
+                     ESP_LOGI(TAG, "Received LORA_EVENT_RESET_CONFIG");
+                     handle_reset_config_event();
+                     break;
+                     
+                 default:
+                     ESP_LOGW(TAG, "Received unknown event ID: 0x%04X", payload.lora_eventID);
+                     break;
+             }
+         }
+         else
+         {
+             ESP_LOGW(TAG, "Checksum validation failed - ignoring event ID");
+         }
     }
     else
     {
@@ -1024,4 +1078,116 @@ void increment_and_store_messageId(uint16_t *messageID)
     }
 
     nvs_close(handle);
+}
+
+/**
+ * @brief Validate and clamp an 8-bit configuration parameter
+ * 
+ * @param value Pointer to the value to validate
+ * @param min Minimum allowed value
+ * @param max Maximum allowed value
+ * @param default_val Default value if validation fails
+ * @return true if value was within range, false if it was clamped
+ */
+static bool validate_config_parameter(uint8_t *value, uint8_t min, uint8_t max, uint8_t default_val)
+{
+    if (*value < min || *value > max)
+    {
+        ESP_LOGW(TAG, "Config parameter out of range: %u (min: %u, max: %u), using default: %u",
+                 *value, min, max, default_val);
+        *value = default_val;
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Validate and clamp a 16-bit configuration parameter
+ * 
+ * @param value Pointer to the value to validate
+ * @param min Minimum allowed value
+ * @param max Maximum allowed value
+ * @param default_val Default value if validation fails
+ * @return true if value was within range, false if it was clamped
+ */
+static bool validate_config_parameter_u16(uint16_t *value, uint16_t min, uint16_t max, uint16_t default_val)
+{
+    if (*value < min || *value > max)
+    {
+        ESP_LOGW(TAG, "Config parameter out of range: %u (min: %u, max: %u), using default: %u",
+                 *value, min, max, default_val);
+        *value = default_val;
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Handle SET_CONFIG event - validate and apply configuration parameters
+ * 
+ * @param config Pointer to the received configuration payload
+ */
+static void handle_set_config_event(const lora_config_payload_t *config)
+{
+    ESP_LOGI(TAG, "Received SET_CONFIG event");
+    
+    // Create a temporary config for validation
+    rainsensor_config_t temp_config = {
+        .ulp_pulses_to_wake_up = config->ulp_pulses_to_wake_up,
+        .wakeup_interval_sec = config->wakeup_interval_sec,
+        .shutdown_delay_ms = config->shutdown_delay_ms,
+        .lora_receive_delay_ms = config->lora_receive_delay_ms,
+    };
+    
+    // Validate all parameters
+    bool all_valid = true;
+    all_valid &= validate_config_parameter(&temp_config.ulp_pulses_to_wake_up,
+                                           CONFIG_MIN_ULP_PULSES,
+                                           CONFIG_MAX_ULP_PULSES,
+                                           CONFIG_DEFAULT_ULP_PULSES);
+    all_valid &= validate_config_parameter_u16(&temp_config.wakeup_interval_sec,
+                                               CONFIG_MIN_WAKEUP_INTERVAL_SEC,
+                                               CONFIG_MAX_WAKEUP_INTERVAL_SEC,
+                                               CONFIG_DEFAULT_WAKEUP_INTERVAL_SEC);
+    all_valid &= validate_config_parameter_u16(&temp_config.shutdown_delay_ms,
+                                               CONFIG_MIN_SHUTDOWN_DELAY_MS,
+                                               CONFIG_MAX_SHUTDOWN_DELAY_MS,
+                                               CONFIG_DEFAULT_SHUTDOWN_DELAY_MS);
+    all_valid &= validate_config_parameter_u16(&temp_config.lora_receive_delay_ms,
+                                               CONFIG_MIN_LORA_RECEIVE_DELAY_MS,
+                                               CONFIG_MAX_LORA_RECEIVE_DELAY_MS,
+                                               CONFIG_DEFAULT_LORA_RECEIVE_DELAY_MS);
+    
+    // Apply validated configuration
+    rainsensor_config = temp_config;
+    
+    ESP_LOGI(TAG, "Configuration applied: pulses=%u, wakeup=%u sec, shutdown=%u ms, lora_rx=%u ms",
+             rainsensor_config.ulp_pulses_to_wake_up,
+             rainsensor_config.wakeup_interval_sec,
+             rainsensor_config.shutdown_delay_ms,
+             rainsensor_config.lora_receive_delay_ms);
+    
+    if (!all_valid)
+    {
+        ESP_LOGW(TAG, "Some configuration parameters were out of range and were clamped to defaults");
+    }
+}
+
+/**
+ * @brief Handle RESET_CONFIG event - restore default configuration
+ */
+static void handle_reset_config_event(void)
+{
+    ESP_LOGI(TAG, "Received RESET_CONFIG event");
+    
+    rainsensor_config.ulp_pulses_to_wake_up = CONFIG_DEFAULT_ULP_PULSES;
+    rainsensor_config.wakeup_interval_sec = CONFIG_DEFAULT_WAKEUP_INTERVAL_SEC;
+    rainsensor_config.shutdown_delay_ms = CONFIG_DEFAULT_SHUTDOWN_DELAY_MS;
+    rainsensor_config.lora_receive_delay_ms = CONFIG_DEFAULT_LORA_RECEIVE_DELAY_MS;
+    
+    ESP_LOGI(TAG, "Configuration reset to defaults: pulses=%u, wakeup=%u sec, shutdown=%u ms, lora_rx=%u ms",
+             rainsensor_config.ulp_pulses_to_wake_up,
+             rainsensor_config.wakeup_interval_sec,
+             rainsensor_config.shutdown_delay_ms,
+             rainsensor_config.lora_receive_delay_ms);
 }
