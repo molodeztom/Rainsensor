@@ -62,11 +62,12 @@ RainSensor
   20250803  V0.9.24         Add Kconfig option to enable/disable debug output, move main receive lora messsage functionality to E32_Lora_Lib
   20250803  V0.9.25         Add version number to E32_Lora_Lib.h and E32_Lora_Lib.c, use it in initLibrary
   20250803  V0.9.26         remove unused variables, use e32_lora_lib_get_version() to get version number, replace deprecated "driver/rtc_cntl.h"
-  20250804  V0.9.27         Restructure app_main to make it more readable. 
+  20250804  V0.9.27         Restructure app_main to make it more readable.
   20250804  V0.9.28         Test receive a struct with checksum, not using terminator because we have a fixed size message
   20260221  V0.9.29         Receive events to control sleep mode
   20260221  V0.9.30         Implement receive parameters Phase 1
   20260621  V0.9.31         Implement receive parameters Phase 2
+  20260225  V0.9.32         Phase 3: Implement response handlers and ACK sending
   */
 
 /*
@@ -215,6 +216,11 @@ static bool validate_config_parameter(uint8_t *value, uint8_t min, uint8_t max, 
 static bool validate_config_parameter_u16(uint16_t *value, uint16_t min, uint16_t max, uint16_t default_val);
 static void handle_set_config_event(const lora_config_payload_t *config);
 static void handle_reset_config_event(void);
+static void send_lora_with_delimiter(const uint8_t *data, size_t len);
+static void send_simple_ack(uint16_t request_event_id);
+static void send_config_response(void);
+static void handle_disable_sleep_event(void);
+static void handle_resume_sleep_event(void);
 
 static const char *TAG = "rainsens";
 
@@ -955,13 +961,11 @@ static void receive_lora_message(void)
              switch (payload.lora_eventID)
              {
                  case LORA_EVENT_DISABLE_SLEEP_MODE:
-                     ESP_LOGI(TAG, "Received LORA_EVENT_DISABLE_SLEEP_MODE - disabling sleep mode");
-                     skip_deep_sleep = true;
+                     handle_disable_sleep_event();
                      break;
                      
                  case LORA_EVENT_RESUME_SLEEP_MODE:
-                     ESP_LOGI(TAG, "Received LORA_EVENT_RESUME_SLEEP_MODE - resuming sleep mode");
-                     skip_deep_sleep = false;
+                     handle_resume_sleep_event();
                      break;
                      
                  case LORA_EVENT_SEND_LORA_PARAMS:
@@ -1171,6 +1175,109 @@ static void handle_set_config_event(const lora_config_payload_t *config)
     {
         ESP_LOGW(TAG, "Some configuration parameters were out of range and were clamped to defaults");
     }
+    
+    // Send response with applied configuration
+    send_config_response();
+}
+
+/**
+ * @brief Send LoRa message with delimiter and increment messageID
+ *
+ * Shared helper function for sending LoRa messages with proper delimiter
+ * and automatic messageID increment.
+ *
+ * @param data Pointer to message data
+ * @param len Length of message data
+ */
+static void send_lora_with_delimiter(const uint8_t *data, size_t len)
+{
+    uint16_t messageID = read_messageId_fromNVS();
+    
+    esp_err_t err = e32_send_message_with_delimiter(data, len);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to send LoRa message: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    increment_and_store_messageId(&messageID);
+}
+
+/**
+ * @brief Send simple ACK for control events
+ *
+ * Sends an acknowledgment message for control events like DISABLE_SLEEP_MODE
+ * and RESUME_SLEEP_MODE. Response event ID = request event ID + 0x1000.
+ *
+ * @param request_event_id The original request event ID
+ */
+static void send_simple_ack(uint16_t request_event_id)
+{
+    lora_payload_t ack_payload;
+    ack_payload.messageID = read_messageId_fromNVS();
+    ack_payload.lora_eventID = request_event_id + 0x1000;  // Response event ID
+    ack_payload.elapsed_time_ms = 0;
+    ack_payload.pulse_count = 0;
+    ack_payload.checksum = lora_payload_checksum(&ack_payload);
+    
+    ESP_LOGD(TAG, "Sending ACK for event 0x%04X, response event 0x%04X",
+             request_event_id, ack_payload.lora_eventID);
+    
+    send_lora_with_delimiter((uint8_t *)&ack_payload, sizeof(ack_payload));
+}
+
+/**
+ * @brief Send configuration response with current settings
+ *
+ * Sends the current configuration values back to the sender as a response
+ * to SET_CONFIG or RESET_CONFIG events.
+ */
+static void send_config_response(void)
+{
+    lora_config_payload_t response;
+    response.messageID = read_messageId_fromNVS();
+    response.lora_eventID = LORA_EVENT_SET_CONFIG_RESPONSE;  // Use SET_CONFIG response ID
+    response.ulp_pulses_to_wake_up = rainsensor_config.ulp_pulses_to_wake_up;
+    response.reserved1 = 0;
+    response.wakeup_interval_sec = rainsensor_config.wakeup_interval_sec;
+    response.shutdown_delay_ms = rainsensor_config.shutdown_delay_ms;
+    response.lora_receive_delay_ms = rainsensor_config.lora_receive_delay_ms;
+    response.reserved2 = 0;
+    response.checksum = lora_config_payload_checksum(&response);
+    
+    ESP_LOGD(TAG, "Sending config response: pulses=%u, wakeup=%u sec, shutdown=%u ms, lora_rx=%u ms",
+             response.ulp_pulses_to_wake_up,
+             response.wakeup_interval_sec,
+             response.shutdown_delay_ms,
+             response.lora_receive_delay_ms);
+    
+    send_lora_with_delimiter((uint8_t *)&response, sizeof(response));
+}
+
+/**
+ * @brief Handle DISABLE_SLEEP_MODE event
+ *
+ * Sets the skip_deep_sleep flag to prevent entering deep sleep mode
+ * and sends an ACK back to the sender.
+ */
+static void handle_disable_sleep_event(void)
+{
+    ESP_LOGI(TAG, "Received DISABLE_SLEEP_MODE event - disabling sleep");
+    skip_deep_sleep = true;
+    send_simple_ack(LORA_EVENT_DISABLE_SLEEP_MODE);
+}
+
+/**
+ * @brief Handle RESUME_SLEEP_MODE event
+ *
+ * Clears the skip_deep_sleep flag to allow normal deep sleep operation
+ * and sends an ACK back to the sender.
+ */
+static void handle_resume_sleep_event(void)
+{
+    ESP_LOGI(TAG, "Received RESUME_SLEEP_MODE event - resuming sleep");
+    skip_deep_sleep = false;
+    send_simple_ack(LORA_EVENT_RESUME_SLEEP_MODE);
 }
 
 /**
@@ -1190,4 +1297,7 @@ static void handle_reset_config_event(void)
              rainsensor_config.wakeup_interval_sec,
              rainsensor_config.shutdown_delay_ms,
              rainsensor_config.lora_receive_delay_ms);
+    
+    // Send response with reset configuration
+    send_config_response();
 }
