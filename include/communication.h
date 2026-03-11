@@ -10,7 +10,6 @@
 
 
 
-
 typedef struct __attribute__((packed)) {
     char elapsed_time_str[9];      // "hh:mm:ss" + '\0'
     uint32_t elapsed_time_ms;      // Elapsed time in ms
@@ -37,6 +36,7 @@ Receiver return message events:
 #define LORA_EVENT_SEND_PROG_PARAMS     0x0004  // Received message: send program parameters
 #define LORA_EVENT_SET_CONFIG           0x0005  // Received message: set configuration parameters
 #define LORA_EVENT_RESET_CONFIG         0x0006  // Received message: reset configuration to defaults
+#define LORA_ACK                        0x1000  // Received message: acknowledge
 
 // Response event IDs (calculated as request + 0x1000)
 #define LORA_EVENT_SET_CONFIG_RESPONSE  0x1005  // Response: configuration set successfully
